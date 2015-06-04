@@ -1,5 +1,11 @@
 [package]
-
-name = "mediawiki-rs"
+name = "mediawiki"
 version = "0.0.1"
 authors = ["Peter Atashian <retep998@gmail.com>"]
+
+[dependencies]
+cookie = "*"
+hyper = "*"
+regex = "*"
+rustc-serialize = "*"
+url = "*"
