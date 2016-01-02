@@ -17,7 +17,10 @@ use rustc_serialize::json::{Array, Json, ParserError};
 use std::cell::{RefCell};
 use std::io::{Read};
 use std::io::Error as IoError;
+use std::thread::{sleep};
+use std::time::{Duration};
 use url::ParseError as UrlError;
+use url::form_urlencoded::{serialize};
 
 #[derive(Debug)]
 pub enum Error {
@@ -53,7 +56,7 @@ impl From<ParserError> for Error {
     }
 }
 
-trait JsonFun<'a> {
+pub trait JsonFun<'a> {
     fn get(self, &str) -> Result<&'a Json, Error>;
     fn string(self) -> Result<&'a str, Error>;
     fn array(self) -> Result<&'a Array, Error>;
@@ -114,8 +117,6 @@ impl Mediawiki {
     fn request(
         &self, base: &str, args: &[(&str, &str)], method: Method,
     ) -> Result<Response, Error> {
-        use std::thread::sleep_ms;
-        use url::form_urlencoded::{serialize};
         let url = try!(Url::parse(&format!("{}?{}", base, serialize(args.iter().map(|&x| x)))));
         loop {
             let r = try!(self.do_request(url.clone(), method.clone()));
@@ -123,7 +124,7 @@ impl Mediawiki {
                 return Ok(r)
             }
             println!("{:?}", r);
-            sleep_ms(1000)
+            sleep(Duration::from_secs(5))
         }
     }
     fn do_login(&self, token: Option<&str>) -> Result<(), Error> {
@@ -150,20 +151,14 @@ impl Mediawiki {
             _ => Err(json.clone().into()),
         }
     }
-    pub fn get_rc(&self) -> Result<(Vec<Json>, String), Error> {
-        let args = vec![
-            ("format", "json"), ("action", "query"),
-            ("list", "recentchanges"), ("rclimit", "1"),
-            ("rcprop", "user|userid|comment|parsedcomment|flags|timestamp|title|\
-            ids|sizes|redirect|patrolled|loginfo|tags|sha1"), ("rcdir", "older")];
-        let mut resp = try!(self.request(&self.config.baseapi, &args, Method::Get));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
-        let rc = try!(json.get("query").get("recentchanges").array());
-        let cont = try!(json.get("query-continue").get("recentchanges")
-            .get("rccontinue").string());
-        Ok((rc.clone(), cont.to_owned()))
+    pub fn recent_changes(&self) -> Result<RecentChanges, Error> {
+        let mut rc = RecentChanges {
+            mw: &self,
+            buf: Vec::new(),
+            cont: "".into(),
+        };
+        try!(rc.fill(true));
+        Ok(rc)
     }
     pub fn login(config: Config) -> Result<Mediawiki, Error> {
         let mw = Mediawiki {
@@ -172,5 +167,42 @@ impl Mediawiki {
         };
         try!(mw.do_login(None));
         Ok(mw)
+    }
+}
+pub struct RecentChanges<'a> {
+    mw: &'a Mediawiki,
+    buf: Vec<Json>,
+    cont: String,
+}
+impl<'a> RecentChanges<'a> {
+    fn fill(&mut self, first: bool) -> Result<(), Error> {
+        let mut resp = {
+            let mut args = vec![
+                ("format", "json"), ("action", "query"),
+                ("list", "recentchanges"), ("rclimit", "10"),
+                ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
+                ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "older")];
+            if !first { args.push(("rccontinue", &self.cont[..])) }
+            try!(self.mw.request(&self.mw.config.baseapi, &args, Method::Get))
+        };
+        let mut body = String::new();
+        try!(resp.read_to_string(&mut body));
+        let json: Json = try!(Json::from_str(&body));
+        self.buf = try!(json.get("query").get("recentchanges").array()).clone();
+        self.buf.reverse();
+        self.cont = try!(json.get("query-continue").get("recentchanges")
+            .get("rccontinue").string()).to_owned();
+        Ok(())
+    }
+}
+impl<'a> Iterator for RecentChanges<'a> {
+    type Item = Result<Json, Error>;
+    fn next(&mut self) -> Option<Result<Json, Error>> {
+        if self.buf.is_empty() {
+            if let Err(e) = self.fill(false) {
+                return Some(Err(e))
+            }
+        }
+        self.buf.pop().map(|c| Ok(c))
     }
 }
