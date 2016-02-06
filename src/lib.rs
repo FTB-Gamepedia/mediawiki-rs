@@ -182,7 +182,11 @@ impl<'a> RecentChanges<'a> {
                 ("list", "recentchanges"), ("rclimit", "10"),
                 ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
                 ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "older")];
-            if !first { args.push(("rccontinue", &self.cont[..])) }
+            if !first {
+                args.push(("rccontinue", &self.cont[..]))
+            } else {
+                args.push(("continue", ""))
+            }
             try!(self.mw.request(&self.mw.config.baseapi, &args, Method::Get))
         };
         let mut body = String::new();
@@ -190,8 +194,7 @@ impl<'a> RecentChanges<'a> {
         let json: Json = try!(Json::from_str(&body));
         self.buf = try!(json.get("query").get("recentchanges").array()).clone();
         self.buf.reverse();
-        self.cont = try!(json.get("query-continue").get("recentchanges")
-            .get("rccontinue").string()).to_owned();
+        self.cont = try!(json.get("continue").get("rccontinue").string()).to_owned();
         Ok(())
     }
 }
