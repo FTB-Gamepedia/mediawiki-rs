@@ -1,4 +1,4 @@
-// Copyright © 2014, Peter Atashian
+// Copyright © 2016, Peter Atashian
 
 extern crate cookie;
 extern crate hyper;
@@ -156,6 +156,7 @@ impl Mediawiki {
             mw: &self,
             buf: Vec::new(),
             cont: "".into(),
+            rccont: "".into(),
         };
         try!(rc.fill(true));
         Ok(rc)
@@ -173,6 +174,7 @@ pub struct RecentChanges<'a> {
     mw: &'a Mediawiki,
     buf: Vec<Json>,
     cont: String,
+    rccont: String,
 }
 impl<'a> RecentChanges<'a> {
     fn fill(&mut self, first: bool) -> Result<(), Error> {
@@ -181,8 +183,9 @@ impl<'a> RecentChanges<'a> {
                 ("format", "json"), ("action", "query"),
                 ("list", "recentchanges"), ("rclimit", "10"),
                 ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
-                ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "older")];
-            if !first { args.push(("rccontinue", &self.cont[..])) }
+                ids|sha1|sizes|redirect|loginfo|tags|flags"), ("rcdir", "older")];
+            args.push(("continue", &self.cont[..]));
+            if !first { args.push(("rccontinue", &self.rccont[..])) }
             try!(self.mw.request(&self.mw.config.baseapi, &args, Method::Get))
         };
         let mut body = String::new();
@@ -190,8 +193,8 @@ impl<'a> RecentChanges<'a> {
         let json: Json = try!(Json::from_str(&body));
         self.buf = try!(json.get("query").get("recentchanges").array()).clone();
         self.buf.reverse();
-        self.cont = try!(json.get("query-continue").get("recentchanges")
-            .get("rccontinue").string()).to_owned();
+        self.cont = try!(json.get("continue").get("continue").string()).to_owned();
+        self.rccont = try!(json.get("continue").get("rccontinue").string()).to_owned();
         Ok(())
     }
 }
