@@ -17,6 +17,7 @@ use rustc_serialize::json::{Array, Json, ParserError};
 use std::cell::{RefCell};
 use std::io::{Read};
 use std::io::Error as IoError;
+use std::marker::{PhantomData};
 use std::thread::{sleep};
 use std::time::{Duration};
 use url::ParseError as UrlError;
@@ -102,30 +103,13 @@ pub struct Mediawiki {
     config: Config,
 }
 impl Mediawiki {
-    fn do_request(
-        &self, url: Url, method: Method,
-    ) -> Result<Response, Error> {
-        let mut request = try!(Request::new(method, url));
-        request.headers_mut().set(UserAgent(self.config.useragent.clone()));
-        request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies.borrow()));
-        let response = try!(try!(request.start()).send());
-        if let Some(cookies) = response.headers.get::<SetCookie>() {
-            cookies.apply_to_cookie_jar(&mut self.cookies.borrow_mut());
-        }
-        Ok(response)
-    }
-    fn request(
-        &self, base: &str, args: &[(&str, &str)], method: Method,
-    ) -> Result<Response, Error> {
-        let url = try!(Url::parse(&format!("{}?{}", base, serialize(args.iter().map(|&x| x)))));
-        loop {
-            let r = try!(self.do_request(url.clone(), method.clone()));
-            if r.status == StatusCode::Ok {
-                return Ok(r)
-            }
-            println!("{:?}", r);
-            sleep(Duration::from_secs(5))
-        }
+    pub fn login(config: Config) -> Result<Mediawiki, Error> {
+        let mw = Mediawiki {
+            cookies: RefCell::new(CookieJar::new(&[])),
+            config: config,
+        };
+        try!(mw.do_login(None));
+        Ok(mw)
     }
     fn do_login(&self, token: Option<&str>) -> Result<(), Error> {
         let mut args = vec![
@@ -151,6 +135,31 @@ impl Mediawiki {
             _ => Err(json.clone().into()),
         }
     }
+    fn do_request(
+        &self, url: Url, method: Method,
+    ) -> Result<Response, Error> {
+        let mut request = try!(Request::new(method, url));
+        request.headers_mut().set(UserAgent(self.config.useragent.clone()));
+        request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies.borrow()));
+        let response = try!(try!(request.start()).send());
+        if let Some(cookies) = response.headers.get::<SetCookie>() {
+            cookies.apply_to_cookie_jar(&mut self.cookies.borrow_mut());
+        }
+        Ok(response)
+    }
+    fn request(
+        &self, base: &str, args: &[(&str, &str)], method: Method,
+    ) -> Result<Response, Error> {
+        let url = try!(Url::parse(&format!("{}?{}", base, serialize(args.iter().map(|&x| x)))));
+        loop {
+            let r = try!(self.do_request(url.clone(), method.clone()));
+            if r.status == StatusCode::Ok {
+                return Ok(r)
+            }
+            println!("{:?}", r);
+            sleep(Duration::from_secs(5))
+        }
+    }
     pub fn recent_changes(&self) -> Result<RecentChanges, Error> {
         let mut rc = RecentChanges {
             mw: &self,
@@ -161,13 +170,14 @@ impl Mediawiki {
         try!(rc.fill(true));
         Ok(rc)
     }
-    pub fn login(config: Config) -> Result<Mediawiki, Error> {
-        let mw = Mediawiki {
-            cookies: RefCell::new(CookieJar::new(&[])),
-            config: config,
-        };
-        try!(mw.do_login(None));
-        Ok(mw)
+    pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
+        let args = [("format", "json"), ("action", "query"),
+            ("meta", "tokens"), ("type", T::in_type())];
+        let mut resp = try!(self.request(&self.config.baseapi, &args, Method::Get));
+        let mut body = String::new();
+        try!(resp.read_to_string(&mut body));
+        let json: Json = try!(Json::from_str(&body));
+        json.get("query").get("tokens").get(T::out_type()).string().map(Token::new)
     }
 }
 pub struct RecentChanges<'a> {
@@ -208,4 +218,39 @@ impl<'a> Iterator for RecentChanges<'a> {
         }
         self.buf.pop().map(|c| Ok(c))
     }
+}
+pub trait TokenType {
+    fn in_type() -> &'static str;
+    fn out_type() -> &'static str;
+}
+#[derive(Debug)] pub struct Token<T>(String, PhantomData<T>);
+impl<T> Token<T> {
+    fn new(token: &str) -> Token<T> {
+        Token(token.to_owned(), PhantomData)
+    }
+}
+#[derive(Debug)] pub struct Csrf;
+impl TokenType for Csrf {
+    fn in_type() -> &'static str { "csrf" }
+    fn out_type() -> &'static str { "csrftoken" }
+}
+#[derive(Debug)] pub struct Watch;
+impl TokenType for Watch {
+    fn in_type() -> &'static str { "watch" }
+    fn out_type() -> &'static str { "watchtoken" }
+}
+#[derive(Debug)] pub struct Patrol;
+impl TokenType for Patrol {
+    fn in_type() -> &'static str { "patrol" }
+    fn out_type() -> &'static str { "patroltoken" }
+}
+#[derive(Debug)] pub struct Rollback;
+impl TokenType for Rollback {
+    fn in_type() -> &'static str { "rollback" }
+    fn out_type() -> &'static str { "rollbacktoken" }
+}
+#[derive(Debug)] pub struct UserRights;
+impl TokenType for UserRights {
+    fn in_type() -> &'static str { "userrights" }
+    fn out_type() -> &'static str { "userrightstoken" }
 }
