@@ -16,7 +16,7 @@ fn main() {
     config.read_to_string(&mut s).unwrap();
     let config = decode(&s).unwrap();
     let mw = Mediawiki::login(config).unwrap();
-    for change in mw.recent_changes(100).unwrap() {
+    for change in mw.query_recentchanges(5000) {
         let change = change.unwrap();
         let kind = change.get("type").string().unwrap_or("unknown");
         let name = if kind == "log" {

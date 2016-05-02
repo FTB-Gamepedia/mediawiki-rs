@@ -10,19 +10,20 @@ use hyper::{Url};
 use hyper::client::request::{Request};
 use hyper::client::response::{Response};
 use hyper::error::Error as HyperError;
-use hyper::header::{Cookie, SetCookie, UserAgent};
+use hyper::header::{ContentType, Cookie, SetCookie, UserAgent};
 use hyper::method::{Method};
 use hyper::status::{StatusCode};
-use rustc_serialize::json::{Array, Json, ParserError};
+use rustc_serialize::json::{Array, Json, Object, ParserError};
+use std::borrow::{Borrow};
 use std::cell::{RefCell};
 use std::collections::{HashMap};
-use std::io::{Read};
+use std::io::{Read, Write};
 use std::io::Error as IoError;
 use std::marker::{PhantomData};
 use std::thread::{sleep};
 use std::time::{Duration};
 use url::ParseError as UrlError;
-use url::form_urlencoded::{serialize};
+use url::form_urlencoded::{Serializer};
 
 #[derive(Debug)]
 pub enum Error {
@@ -63,6 +64,7 @@ pub trait JsonFun<'a> {
     fn string(self) -> Result<&'a str, Error>;
     fn array(self) -> Result<&'a Array, Error>;
     fn integer(self) -> Result<i64, Error>;
+    fn object(self) -> Result<&'a Object, Error>;
 }
 impl<'a> JsonFun<'a> for &'a Json {
     fn get(self, s: &str) -> Result<&'a Json, Error> {
@@ -77,6 +79,9 @@ impl<'a> JsonFun<'a> for &'a Json {
     fn integer(self) -> Result<i64, Error> {
         Ok(try!(self.as_i64().ok_or(self.clone())))
     }
+    fn object(self) -> Result<&'a Object, Error> {
+        Ok(try!(self.as_object().ok_or(self.clone())))
+    }
 }
 impl<'a> JsonFun<'a> for Result<&'a Json, Error> {
     fn get(self, s: &str) -> Result<&'a Json, Error> {
@@ -90,6 +95,9 @@ impl<'a> JsonFun<'a> for Result<&'a Json, Error> {
     }
     fn integer(self) -> Result<i64, Error> {
         self.and_then(|x| x.integer())
+    }
+    fn object(self) -> Result<&'a Object, Error> {
+        self.and_then(|x| x.object())
     }
 }
 #[derive(RustcDecodable)]
@@ -121,7 +129,7 @@ impl Mediawiki {
         if let Some(token) = token {
             args.push(("lgtoken", token));
         }
-        let mut resp = try!(self.request(&self.config.baseapi, &args, Method::Post));
+        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
         let mut body = String::new();
         try!(resp.read_to_string(&mut body));
         let json: Json = try!(Json::from_str(&body));
@@ -137,23 +145,33 @@ impl Mediawiki {
         }
     }
     fn do_request(
-        &self, url: Url, method: Method,
+        &self, url: Url, method: Method, body: Option<&str>,
     ) -> Result<Response, Error> {
         let mut request = try!(Request::new(method, url));
         request.headers_mut().set(UserAgent(self.config.useragent.clone()));
         request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies.borrow()));
-        let response = try!(try!(request.start()).send());
+        if body.is_some() {
+            request.headers_mut().set(ContentType("application/x-www-form-urlencoded".parse().unwrap()));
+        }
+        let mut request = try!(request.start());
+        if let Some(body) = body {
+            try!(request.write_all(body.as_bytes()));
+        }
+        let response = try!(request.send());
         if let Some(cookies) = response.headers.get::<SetCookie>() {
             cookies.apply_to_cookie_jar(&mut self.cookies.borrow_mut());
         }
         Ok(response)
     }
-    fn request(
-        &self, base: &str, args: &[(&str, &str)], method: Method,
-    ) -> Result<Response, Error> {
-        let url = try!(Url::parse(&format!("{}?{}", base, serialize(args.iter().map(|&x| x)))));
+    fn get_request<I, K, V>(
+        &self, base: &str, args: I,
+    ) -> Result<Response, Error> where
+        I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
+    {
+        let query = Serializer::new(String::new()).extend_pairs(args).finish();
+        let url = try!(Url::parse(&format!("{}?{}", base, query)));
         loop {
-            let r = try!(self.do_request(url.clone(), method.clone()));
+            let r = try!(self.do_request(url.clone(), Method::Get, None));
             if r.status == StatusCode::Ok {
                 return Ok(r)
             }
@@ -161,76 +179,113 @@ impl Mediawiki {
             sleep(Duration::from_secs(5))
         }
     }
-    pub fn recent_changes(&self, limit: u32) -> Result<RecentChanges, Error> {
-        let mut rc = RecentChanges {
+    fn post_request<I, K, V>(
+        &self, base: &str, args: I,
+    ) -> Result<Response, Error> where
+        I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
+    {
+        let query = Serializer::new(String::new()).extend_pairs(args).finish();
+        let url = try!(Url::parse(base));
+        loop {
+            let r = try!(self.do_request(url.clone(), Method::Post, Some(&*query)));
+            if r.status == StatusCode::Ok {
+                return Ok(r)
+            }
+            println!("{:?}", r);
+            sleep(Duration::from_secs(5))
+        }
+    }
+    pub fn query_recentchanges(&self, limit: u32) -> Query {
+        let mut args: HashMap<String, String> = [
+            ("continue", ""), ("list", "recentchanges"), ("format", "json"),
+            ("action", "query"), ("rcdir", "older"),
+            ("rcprop", "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags"),
+        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
+        args.insert("limit".into(), limit.to_string());
+        Query {
             mw: &self,
+            name: "recentchanges".into(),
             buf: Vec::new(),
-            cont: "".into(),
-            rccont: "".into(),
-            limit: limit,
-        };
-        try!(rc.fill(true));
-        Ok(rc)
+            args: args,
+            done: false,
+        }
     }
     pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
         let args = [("format", "json"), ("action", "query"),
             ("meta", "tokens"), ("type", T::in_type())];
-        let mut resp = try!(self.request(&self.config.baseapi, &args, Method::Get));
+        let mut resp = try!(self.get_request(&self.config.baseapi, &args));
         let mut body = String::new();
         try!(resp.read_to_string(&mut body));
         let json: Json = try!(Json::from_str(&body));
         json.get("query").get("tokens").get(T::out_type()).string().map(Token::new)
     }
-    pub fn query_tiles(&self) -> Query {
-        unimplemented!()
+    pub fn query_tiles(&self, modab: String) -> Query {
+        let mut args: HashMap<String, String> = [
+            ("format", "json"), ("action", "query"), ("continue", ""), ("list", "tiles"), ("tslimit", "5000"),
+        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
+        args.insert("tsmod".into(), modab);
+        Query {
+            mw: &self,
+            name: "tiles".into(),
+            buf: Vec::new(),
+            args: args,
+            done: false,
+        }
+    }
+    pub fn delete_tiles(&self, token: &Token<Csrf>, ids: String) -> Result<Json, Error> {
+        let args = [("format", "json"), ("action", "deletetiles"),
+            ("tstoken", &*token.0), ("tsids", &*ids)];
+        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
+        let mut body = String::new();
+        try!(resp.read_to_string(&mut body));
+        let json: Json = try!(Json::from_str(&body));
+        Ok(json)
     }
 }
 pub struct Query<'a> {
     mw: &'a Mediawiki,
+    name: String,
     buf: Vec<Json>,
-    params: HashMap<String, String>,
+    args: HashMap<String, String>,
+    done: bool,
 }
-pub struct RecentChanges<'a> {
-    mw: &'a Mediawiki,
-    buf: Vec<Json>,
-    cont: String,
-    rccont: String,
-    limit: u32,
-}
-impl<'a> RecentChanges<'a> {
-    fn fill(&mut self, first: bool) -> Result<bool, Error> {
-        let mut resp = {
-            let limit = self.limit.to_string();
-            let mut args = vec![
-                ("format", "json"), ("action", "query"),
-                ("list", "recentchanges"), ("rclimit", &*limit),
-                ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
-                ids|sha1|sizes|redirect|loginfo|tags|flags"), ("rcdir", "older")];
-            args.push(("continue", &self.cont[..]));
-            if !first { args.push(("rccontinue", &self.rccont[..])) }
-            try!(self.mw.request(&self.mw.config.baseapi, &args, Method::Get))
-        };
+impl<'a> Query<'a> {
+    fn fill(&mut self) -> Result<bool, Error> {
+        let mut resp = try!(self.mw.get_request(&self.mw.config.baseapi, &self.args));
         let mut body = String::new();
         try!(resp.read_to_string(&mut body));
         let json: Json = try!(Json::from_str(&body));
-        self.buf = try!(json.get("query").get("recentchanges").array()).clone();
-        self.buf.reverse();
-        if json.get("batchcomplete").is_ok() {
-            Ok(false)
+        let buf = try!(json.get("query").get(&self.name));
+        if let Ok(buf) = buf.array() {
+            self.buf.clone_from(buf);
+        } else if let Ok(buf) = buf.object() {
+            self.buf.extend(buf.iter().map(|(id, rest)| {
+                let mut json = rest.clone();
+                json.as_object_mut().unwrap().insert("id".into(), Json::String(id.clone()));
+                json
+            }));
         } else {
-            self.cont = try!(json.get("continue").get("continue").string()).to_owned();
-            self.rccont = try!(json.get("continue").get("rccontinue").string()).to_owned();
+            unreachable!("{:?}", buf);
+        }
+        self.buf.reverse();
+        if let Ok(cont) = json.get("continue") {
+            for (key, val) in try!(cont.object()) {
+                self.args.insert(key.clone(), try!(val.string()).into());
+            }
             Ok(true)
+        } else {
+            Ok(false)
         }
     }
 }
-impl<'a> Iterator for RecentChanges<'a> {
+impl<'a> Iterator for Query<'a> {
     type Item = Result<Json, Error>;
     fn next(&mut self) -> Option<Result<Json, Error>> {
         if self.buf.is_empty() {
-            match self.fill(false) {
+            if self.done { return None }
+            match self.fill() {
                 Err(e) => return Some(Err(e)),
-                Ok(false) =>  return None,
+                Ok(false) => self.done = true,
                 Ok(true) => (),
             }
         }
