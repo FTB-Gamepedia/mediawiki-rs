@@ -15,6 +15,7 @@ use hyper::method::{Method};
 use hyper::status::{StatusCode};
 use rustc_serialize::json::{Array, Json, ParserError};
 use std::cell::{RefCell};
+use std::collections::{HashMap};
 use std::io::{Read};
 use std::io::Error as IoError;
 use std::marker::{PhantomData};
@@ -160,12 +161,13 @@ impl Mediawiki {
             sleep(Duration::from_secs(5))
         }
     }
-    pub fn recent_changes(&self) -> Result<RecentChanges, Error> {
+    pub fn recent_changes(&self, limit: u32) -> Result<RecentChanges, Error> {
         let mut rc = RecentChanges {
             mw: &self,
             buf: Vec::new(),
             cont: "".into(),
             rccont: "".into(),
+            limit: limit,
         };
         try!(rc.fill(true));
         Ok(rc)
@@ -179,19 +181,29 @@ impl Mediawiki {
         let json: Json = try!(Json::from_str(&body));
         json.get("query").get("tokens").get(T::out_type()).string().map(Token::new)
     }
+    pub fn query_tiles(&self) -> Query {
+        unimplemented!()
+    }
+}
+pub struct Query<'a> {
+    mw: &'a Mediawiki,
+    buf: Vec<Json>,
+    params: HashMap<String, String>,
 }
 pub struct RecentChanges<'a> {
     mw: &'a Mediawiki,
     buf: Vec<Json>,
     cont: String,
     rccont: String,
+    limit: u32,
 }
 impl<'a> RecentChanges<'a> {
-    fn fill(&mut self, first: bool) -> Result<(), Error> {
+    fn fill(&mut self, first: bool) -> Result<bool, Error> {
         let mut resp = {
+            let limit = self.limit.to_string();
             let mut args = vec![
                 ("format", "json"), ("action", "query"),
-                ("list", "recentchanges"), ("rclimit", "10"),
+                ("list", "recentchanges"), ("rclimit", &*limit),
                 ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
                 ids|sha1|sizes|redirect|loginfo|tags|flags"), ("rcdir", "older")];
             args.push(("continue", &self.cont[..]));
@@ -203,17 +215,23 @@ impl<'a> RecentChanges<'a> {
         let json: Json = try!(Json::from_str(&body));
         self.buf = try!(json.get("query").get("recentchanges").array()).clone();
         self.buf.reverse();
-        self.cont = try!(json.get("continue").get("continue").string()).to_owned();
-        self.rccont = try!(json.get("continue").get("rccontinue").string()).to_owned();
-        Ok(())
+        if json.get("batchcomplete").is_ok() {
+            Ok(false)
+        } else {
+            self.cont = try!(json.get("continue").get("continue").string()).to_owned();
+            self.rccont = try!(json.get("continue").get("rccontinue").string()).to_owned();
+            Ok(true)
+        }
     }
 }
 impl<'a> Iterator for RecentChanges<'a> {
     type Item = Result<Json, Error>;
     fn next(&mut self) -> Option<Result<Json, Error>> {
         if self.buf.is_empty() {
-            if let Err(e) = self.fill(false) {
-                return Some(Err(e))
+            match self.fill(false) {
+                Err(e) => return Some(Err(e)),
+                Ok(false) =>  return None,
+                Ok(true) => (),
             }
         }
         self.buf.pop().map(|c| Ok(c))
