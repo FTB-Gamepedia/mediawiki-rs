@@ -224,6 +224,19 @@ impl Mediawiki {
             done: false,
         }
     }
+    pub fn query_allpages(&self, limit: u32) -> Query {
+        let mut args: HashMap<String, String> = [
+            ("continue", ""), ("list", "allpages"), ("format", "json"), ("action", "query")
+        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
+        args.insert("limit".into(), limit.to_string());
+        Query {
+            mw: &self,
+            name: "allpages".into(),
+            buf: Vec::new(),
+            args: args,
+            done: false,
+        }
+    }
     pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
         let args = [("format", "json"), ("action", "query"),
             ("meta", "tokens"), ("type", T::in_type())];
