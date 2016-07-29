@@ -162,6 +162,7 @@ impl Mediawiki {
         &self, url: Url, method: Method, body: Option<&str>,
     ) -> Result<Response, Error> {
         let mut request = try!(Request::new(method, url));
+        try!(request.set_read_timeout(Some(Duration::from_secs(5))));
         request.headers_mut().set(UserAgent(self.config.useragent.clone()));
         request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies.borrow()));
         if body.is_some() {

@@ -2,7 +2,8 @@
 name = "mediawiki"
 version = "0.0.1"
 authors = ["Peter Atashian <retep998@gmail.com>"]
-
+[profile.release]
+debug = true
 [dependencies]
 cookie = "0.2"
 hyper = "0.9"
