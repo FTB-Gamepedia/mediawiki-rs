@@ -5,7 +5,7 @@ extern crate hyper;
 extern crate rustc_serialize;
 extern crate url;
 
-use cookie::{CookieJar};
+use cookie::{CookieJar, ParseError as CookieError};
 use hyper::{Url};
 use hyper::client::request::{Request};
 use hyper::client::response::{Response};
@@ -34,6 +34,7 @@ pub enum Error {
     Hyper(HyperError),
     Io(IoError),
     Parse(ParserError),
+    Cookie(CookieError),
 }
 impl From<Json> for Error {
     fn from(err: Json) -> Error {
@@ -63,6 +64,11 @@ impl From<IoError> for Error {
 impl From<ParserError> for Error {
     fn from(err: ParserError) -> Error {
         Error::Parse(err)
+    }
+}
+impl From<CookieError> for Error {
+    fn from(err: CookieError) -> Error {
+        Error::Cookie(err)
     }
 }
 
@@ -115,13 +121,13 @@ pub struct Config {
     baseapi: String,
 }
 pub struct Mediawiki {
-    cookies: RefCell<CookieJar<'static>>,
+    cookies: RefCell<CookieJar>,
     config: Config,
 }
 impl Mediawiki {
     pub fn login(config: Config) -> Result<Mediawiki, Error> {
         let mw = Mediawiki {
-            cookies: RefCell::new(CookieJar::new(&[])),
+            cookies: RefCell::new(CookieJar::new()),
             config: config,
         };
         try!(mw.do_login(None));
@@ -164,7 +170,9 @@ impl Mediawiki {
         let mut request = try!(Request::new(method, url));
         try!(request.set_read_timeout(Some(Duration::from_secs(5))));
         request.headers_mut().set(UserAgent(self.config.useragent.clone()));
-        request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies.borrow()));
+        request.headers_mut().set(Cookie(self.cookies.borrow().iter().map(|cookie| {
+            format!("{}", cookie)
+        }).collect()));
         if body.is_some() {
             request.headers_mut().set(ContentType("application/x-www-form-urlencoded".parse().unwrap()));
         }
@@ -174,7 +182,9 @@ impl Mediawiki {
         }
         let response = try!(request.send());
         if let Some(cookies) = response.headers.get::<SetCookie>() {
-            cookies.apply_to_cookie_jar(&mut self.cookies.borrow_mut());
+            for cookie in &cookies.0 {
+                self.cookies.borrow_mut().add(cookie::Cookie::parse(&**cookie)?.into_owned());
+            }
         }
         Ok(response)
     }

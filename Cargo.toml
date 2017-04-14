@@ -5,8 +5,8 @@ authors = ["Peter Atashian <retep998@gmail.com>"]
 [profile.release]
 debug = true
 [dependencies]
-cookie = "0.2"
-hyper = "0.9"
-regex = "0.1"
+cookie = { default-features = false, version = "0.7" }
+hyper = "0.10"
+regex = "0.2"
 rustc-serialize = "0.3"
-url = "1.0"
+url = "1.4"
