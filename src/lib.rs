@@ -168,7 +168,7 @@ impl Mediawiki {
         &self, url: Url, method: Method, body: Option<&str>,
     ) -> Result<Response, Error> {
         let mut request = try!(Request::new(method, url));
-        try!(request.set_read_timeout(Some(Duration::from_secs(5))));
+        try!(request.set_read_timeout(Some(Duration::from_secs(60))));
         request.headers_mut().set(UserAgent(self.config.useragent.clone()));
         request.headers_mut().set(Cookie(self.cookies.borrow().iter().map(|cookie| {
             format!("{}", cookie)
@@ -244,11 +244,13 @@ impl Mediawiki {
         let json: Json = try!(Json::from_str(&body));
         json.get("query").get("tokens").get(T::out_type()).string().map(Token::new)
     }
-    pub fn query_tiles(&self, modab: String) -> Query {
+    pub fn query_tiles(&self, tsmod: Option<&str>) -> Query {
         let mut args: HashMap<String, String> = [
             ("format", "json"), ("action", "query"), ("continue", ""), ("list", "tiles"), ("tslimit", "5000"),
         ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
-        args.insert("tsmod".into(), modab);
+        if let Some(tsmod) = tsmod {
+            args.insert("tsmod".into(), tsmod.into());
+        }
         Query {
             mw: &self,
             name: "tiles".into(),
@@ -257,22 +259,23 @@ impl Mediawiki {
             done: false,
         }
     }
-    pub fn delete_tiles(&self, token: &Token<Csrf>, ids: String) -> Result<Json, Error> {
-        let args = [("format", "json"), ("action", "deletetiles"),
-            ("tstoken", &*token.0), ("tsids", &*ids)];
+    pub fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error> {
+        let args = [
+            ("format", "json"), ("action", "deletetiles"),
+            ("tstoken", &*token.0), ("tsids", ids),
+        ];
         let mut resp = try!(self.post_request(&self.config.baseapi, &args));
         let mut body = String::new();
         try!(resp.read_to_string(&mut body));
         let json: Json = try!(Json::from_str(&body));
         Ok(json)
     }
-    pub fn add_tile(
-        &self, token: &Token<Csrf>, tsmod: &str, tsname: &str, tsx: u32, tsy: u32,
+    pub fn add_tiles(
+        &self, token: &Token<Csrf>, tsmod: &str, tsimport: &str,
     ) -> Result<Json, Error> {
-        let (x, y) = (tsx.to_string(), tsy.to_string());
         let args = [
-            ("format", "json"), ("action", "addtile"), ("tstoken", &*token.0), ("tsmod", tsmod),
-            ("tsname", tsname), ("tsx", &*x), ("tsy", &*y),
+            ("format", "json"), ("action", "addtiles"), ("tstoken", &*token.0), ("tsmod", tsmod),
+            ("tsimport", tsimport),
         ];
         let mut resp = try!(self.post_request(&self.config.baseapi, &args));
         let mut body = String::new();
