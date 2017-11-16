@@ -1,8 +1,13 @@
 // Copyright © 2016, Peter Atashian
 
+#![feature(try_trait)]
+
 extern crate cookie;
 extern crate hyper;
-extern crate rustc_serialize;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 extern crate url;
 
 use cookie::{CookieJar, ParseError as CookieError};
@@ -13,13 +18,14 @@ use hyper::error::Error as HyperError;
 use hyper::header::{ContentType, Cookie, SetCookie, UserAgent};
 use hyper::method::{Method};
 use hyper::status::{StatusCode};
-use rustc_serialize::json::{Array, DecoderError, Json, Object, ParserError, decode};
+use serde_json::{Error as ParseError, Value as Json};
 use std::borrow::{Borrow};
 use std::cell::{RefCell};
 use std::collections::{HashMap};
 use std::fs::{File};
-use std::io::{Error as IoError, Read, Write};
+use std::io::{Error as IoError, Write};
 use std::marker::{PhantomData};
+use std::option::NoneError;
 use std::path::{Path};
 use std::thread::{sleep};
 use std::time::{Duration};
@@ -29,21 +35,16 @@ use url::form_urlencoded::{Serializer};
 #[derive(Debug)]
 pub enum Error {
     Json(Json),
-    Decode(DecoderError),
     Url(UrlError),
     Hyper(HyperError),
     Io(IoError),
-    Parse(ParserError),
+    Parse(ParseError),
     Cookie(CookieError),
+    None,
 }
 impl From<Json> for Error {
     fn from(err: Json) -> Error {
         Error::Json(err)
-    }
-}
-impl From<DecoderError> for Error {
-    fn from(err: DecoderError) -> Error {
-        Error::Decode(err)
     }
 }
 impl From<UrlError> for Error {
@@ -61,8 +62,8 @@ impl From<IoError> for Error {
         Error::Io(err)
     }
 }
-impl From<ParserError> for Error {
-    fn from(err: ParserError) -> Error {
+impl From<ParseError> for Error {
+    fn from(err: ParseError) -> Error {
         Error::Parse(err)
     }
 }
@@ -71,49 +72,13 @@ impl From<CookieError> for Error {
         Error::Cookie(err)
     }
 }
+impl From<NoneError> for Error {
+    fn from(_: NoneError) -> Error {
+        Error::None
+    }
+}
 
-pub trait JsonFun<'a> {
-    fn get(self, &str) -> Result<&'a Json, Error>;
-    fn string(self) -> Result<&'a str, Error>;
-    fn array(self) -> Result<&'a Array, Error>;
-    fn integer(self) -> Result<i64, Error>;
-    fn object(self) -> Result<&'a Object, Error>;
-}
-impl<'a> JsonFun<'a> for &'a Json {
-    fn get(self, s: &str) -> Result<&'a Json, Error> {
-        Ok(try!(self.find(s).ok_or(self.clone())))
-    }
-    fn string(self) -> Result<&'a str, Error> {
-        Ok(try!(self.as_string().ok_or(self.clone())))
-    }
-    fn array(self) -> Result<&'a Array, Error> {
-        Ok(try!(self.as_array().ok_or(self.clone())))
-    }
-    fn integer(self) -> Result<i64, Error> {
-        Ok(try!(self.as_i64().ok_or(self.clone())))
-    }
-    fn object(self) -> Result<&'a Object, Error> {
-        Ok(try!(self.as_object().ok_or(self.clone())))
-    }
-}
-impl<'a> JsonFun<'a> for Result<&'a Json, Error> {
-    fn get(self, s: &str) -> Result<&'a Json, Error> {
-        self.and_then(|x| x.get(s))
-    }
-    fn string(self) -> Result<&'a str, Error> {
-        self.and_then(|x| x.string())
-    }
-    fn array(self) -> Result<&'a Array, Error> {
-        self.and_then(|x| x.array())
-    }
-    fn integer(self) -> Result<i64, Error> {
-        self.and_then(|x| x.integer())
-    }
-    fn object(self) -> Result<&'a Object, Error> {
-        self.and_then(|x| x.object())
-    }
-}
-#[derive(RustcDecodable)]
+#[derive(Deserialize)]
 pub struct Config {
     useragent: String,
     username: String,
@@ -130,14 +95,12 @@ impl Mediawiki {
             cookies: RefCell::new(CookieJar::new()),
             config: config,
         };
-        try!(mw.do_login(None));
+        mw.do_login(None)?;
         Ok(mw)
     }
     pub fn login_file<P: AsRef<Path>>(path: P) -> Result<Mediawiki, Error> {
-        let mut config = try!(File::open(path));
-        let mut s = String::new();
-        try!(config.read_to_string(&mut s));
-        let config = try!(decode(&s));
+        let file = File::open(path)?;
+        let config: Config = serde_json::from_reader(file)?;
         Mediawiki::login(config)
     }
     fn do_login(&self, token: Option<&str>) -> Result<(), Error> {
@@ -149,14 +112,12 @@ impl Mediawiki {
         if let Some(token) = token {
             args.push(("lgtoken", token));
         }
-        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
-        let inner = try!(json.get("login"));
-        let result = try!(inner.get("result").string());
+        let resp = self.post_request(&self.config.baseapi, &args)?;
+        let json: Json = serde_json::from_reader(resp)?;
+        let inner = json.get("login")?;
+        let result = inner.get("result")?.as_str()?;
         match result {
-            "NeedToken" => self.do_login(Some(try!(inner.get("token").string()))),
+            "NeedToken" => self.do_login(Some(inner.get("token")?.as_str()?)),
             "Success" => {
                 println!("Logged in to MediaWiki");
                 Ok(())
@@ -167,8 +128,8 @@ impl Mediawiki {
     fn do_request(
         &self, url: Url, method: Method, body: Option<&str>,
     ) -> Result<Response, Error> {
-        let mut request = try!(Request::new(method, url));
-        try!(request.set_read_timeout(Some(Duration::from_secs(60))));
+        let mut request = Request::new(method, url)?;
+        request.set_read_timeout(Some(Duration::from_secs(60)))?;
         request.headers_mut().set(UserAgent(self.config.useragent.clone()));
         request.headers_mut().set(Cookie(self.cookies.borrow().iter().map(|cookie| {
             format!("{}", cookie)
@@ -176,11 +137,11 @@ impl Mediawiki {
         if body.is_some() {
             request.headers_mut().set(ContentType("application/x-www-form-urlencoded".parse().unwrap()));
         }
-        let mut request = try!(request.start());
+        let mut request = request.start()?;
         if let Some(body) = body {
-            try!(request.write_all(body.as_bytes()));
+            request.write_all(body.as_bytes())?;
         }
-        let response = try!(request.send());
+        let response = request.send()?;
         if let Some(cookies) = response.headers.get::<SetCookie>() {
             for cookie in &cookies.0 {
                 self.cookies.borrow_mut().add(cookie::Cookie::parse(&**cookie)?.into_owned());
@@ -194,9 +155,9 @@ impl Mediawiki {
         I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
     {
         let query = Serializer::new(String::new()).extend_pairs(args).finish();
-        let url = try!(Url::parse(&format!("{}?{}", base, query)));
+        let url = Url::parse(&format!("{}?{}", base, query))?;
         loop {
-            let r = try!(self.do_request(url.clone(), Method::Get, None));
+            let r = self.do_request(url.clone(), Method::Get, None)?;
             if r.status == StatusCode::Ok {
                 return Ok(r)
             }
@@ -210,9 +171,9 @@ impl Mediawiki {
         I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
     {
         let query = Serializer::new(String::new()).extend_pairs(args).finish();
-        let url = try!(Url::parse(base));
+        let url = Url::parse(base)?;
         loop {
-            let r = try!(self.do_request(url.clone(), Method::Post, Some(&*query)));
+            let r = self.do_request(url.clone(), Method::Post, Some(&*query))?;
             if r.status == StatusCode::Ok {
                 return Ok(r)
             }
@@ -238,11 +199,9 @@ impl Mediawiki {
     pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
         let args = [("format", "json"), ("action", "query"),
             ("meta", "tokens"), ("type", T::in_type())];
-        let mut resp = try!(self.get_request(&self.config.baseapi, &args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
-        json.get("query").get("tokens").get(T::out_type()).string().map(Token::new)
+        let resp = try!(self.get_request(&self.config.baseapi, &args));
+        let json: Json = serde_json::from_reader(resp)?;
+        Ok(Token::new(json.get("query")?.get("tokens")?.get(T::out_type())?.as_str()?))
     }
     pub fn query_tiles(&self, tsmod: Option<&str>) -> Query {
         let mut args: HashMap<String, String> = [
@@ -264,10 +223,8 @@ impl Mediawiki {
             ("format", "json"), ("action", "deletetiles"),
             ("tstoken", &*token.0), ("tsids", ids),
         ];
-        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
+        let resp = try!(self.post_request(&self.config.baseapi, &args));
+        let json: Json = serde_json::from_reader(resp)?;
         Ok(json)
     }
     pub fn add_tiles(
@@ -277,10 +234,8 @@ impl Mediawiki {
             ("format", "json"), ("action", "addtiles"), ("tstoken", &*token.0), ("tsmod", tsmod),
             ("tsimport", tsimport),
         ];
-        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
+        let resp = try!(self.post_request(&self.config.baseapi, &args));
+        let json: Json = serde_json::from_reader(resp)?;
         Ok(json)
     }
     pub fn create_sheet(
@@ -290,10 +245,8 @@ impl Mediawiki {
             ("format", "json"), ("action", "createsheet"), ("tstoken", &*token.0),
             ("tsmod", tsmod), ("tssizes", tssizes),
         ];
-        let mut resp = try!(self.post_request(&self.config.baseapi, &args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
+        let resp = try!(self.post_request(&self.config.baseapi, &args));
+        let json: Json = serde_json::from_reader(resp)?;
         Ok(json)
     }
 }
@@ -306,16 +259,14 @@ pub struct Query<'a> {
 }
 impl<'a> Query<'a> {
     fn fill(&mut self) -> Result<bool, Error> {
-        let mut resp = try!(self.mw.get_request(&self.mw.config.baseapi, &self.args));
-        let mut body = String::new();
-        try!(resp.read_to_string(&mut body));
-        let json: Json = try!(Json::from_str(&body));
-        let buf = try!(json.get("query").get(&self.name));
-        self.buf.clone_from(try!(buf.array()));
+        let resp = self.mw.get_request(&self.mw.config.baseapi, &self.args)?;
+        let json: Json = serde_json::from_reader(resp)?;
+        let buf = json.get("query")?.get(&self.name)?;
+        self.buf.clone_from(buf.as_array()?);
         self.buf.reverse();
-        if let Ok(cont) = json.get("continue") {
-            for (key, val) in try!(cont.object()) {
-                self.args.insert(key.clone(), try!(val.string()).into());
+        if let Some(cont) = json.get("continue") {
+            for (key, val) in cont.as_object()? {
+                self.args.insert(key.clone(), val.as_str()?.into());
             }
             Ok(true)
         } else {
