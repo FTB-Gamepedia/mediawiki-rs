@@ -10,11 +10,12 @@ fn import() {
     for tile in mw.query_tiles(None) {
         let tile = tile.unwrap();
         let tile = tile.as_object().unwrap();
+        let id = tile["id"].as_u64().unwrap();
         let x = tile["x"].as_u64().unwrap();
         let y = tile["y"].as_u64().unwrap();
         let name = tile["name"].as_str().unwrap();
         let mod_ = tile["mod"].as_str().unwrap();
-        writeln!(&mut file, "{} {} {} {}", mod_, x, y, name).unwrap();
+        writeln!(&mut file, "{} {} {} {} {}", id, mod_, x, y, name).unwrap();
     }
 }
 fn main() {

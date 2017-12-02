@@ -218,6 +218,18 @@ impl Mediawiki {
             done: false,
         }
     }
+    pub fn query_ores(&self) -> Query {
+        let args: HashMap<String, String> = [
+            ("format", "json"), ("action", "query"), ("continue", ""), ("list", "oredictsearch"), ("odlimit", "5000"),
+        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
+        Query {
+            mw: &self,
+            name: "oredictentries".into(),
+            buf: Vec::new(),
+            args: args,
+            done: false,
+        }
+    }
     pub fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error> {
         let args = [
             ("format", "json"), ("action", "deletetiles"),
