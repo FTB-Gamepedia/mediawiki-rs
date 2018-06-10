@@ -32,6 +32,9 @@ use std::{
     time::Duration,
 };
 
+pub mod tilesheet;
+pub mod oredict;
+
 #[derive(Debug)]
 pub enum Error {
     Json(Json),
@@ -149,66 +152,6 @@ impl Mediawiki {
         query.arg("limit", limit.to_string());
         query
     }
-    /*
-    pub fn query_tiles(&self, tsmod: Option<&str>) -> Query {
-        let mut args: HashMap<String, String> = [
-            ("format", "json"), ("action", "query"), ("continue", ""), ("list", "tiles"), ("tslimit", "5000"),
-        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
-        if let Some(tsmod) = tsmod {
-            args.insert("tsmod".into(), tsmod.into());
-        }
-        Query {
-            mw: &self,
-            name: "tiles".into(),
-            buf: Vec::new(),
-            args: args,
-            done: false,
-        }
-    }
-    pub fn query_ores(&self) -> Query {
-        let args: HashMap<String, String> = [
-            ("format", "json"), ("action", "query"), ("continue", ""), ("list", "oredictsearch"), ("odlimit", "5000"),
-        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
-        Query {
-            mw: &self,
-            name: "oredictentries".into(),
-            buf: Vec::new(),
-            args: args,
-            done: false,
-        }
-    }
-    pub fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error> {
-        let args = [
-            ("format", "json"), ("action", "deletetiles"),
-            ("tstoken", &*token.0), ("tsids", ids),
-        ];
-        let resp = try!(self.post_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
-        Ok(json)
-    }
-    pub fn add_tiles(
-        &self, token: &Token<Csrf>, tsmod: &str, tsimport: &str,
-    ) -> Result<Json, Error> {
-        let args = [
-            ("format", "json"), ("action", "addtiles"), ("tstoken", &*token.0), ("tsmod", tsmod),
-            ("tsimport", tsimport),
-        ];
-        let resp = try!(self.post_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
-        Ok(json)
-    }
-    pub fn create_sheet(
-        &self, token: &Token<Csrf>, tsmod: &str, tssizes: &str
-    ) -> Result<Json, Error> {
-        let args = [
-            ("format", "json"), ("action", "createsheet"), ("tstoken", &*token.0),
-            ("tsmod", tsmod), ("tssizes", tssizes),
-        ];
-        let resp = try!(self.post_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
-        Ok(json)
-    }
-    */
 }
 pub struct RequestBuilder<'a> {
     mw: &'a Mediawiki,
