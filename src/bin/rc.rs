@@ -3,13 +3,14 @@ extern crate mediawiki;
 use mediawiki::{Error, Mediawiki};
 use std::collections::{HashMap};
 use std::fs::{create_dir, File};
-use std::io::{Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 fn main() {
     let base = Path::new("rc");
-    let mut files: HashMap<PathBuf, File> = HashMap::new();
-    let mw = Mediawiki::login_file("ftb.json").unwrap();
+    let _ = create_dir(base);
+    let mut files: HashMap<PathBuf, BufWriter<File>> = HashMap::new();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     for change in mw.query_recentchanges(5000) {
         if let Err(e) = (|| -> Result<(), Error> {
             let change = change?;
@@ -23,7 +24,7 @@ fn main() {
                 base.join(kind).with_extension("json")
             };
             let mut file = files.entry(name.clone())
-                .or_insert_with(|| File::create(name).unwrap());
+                .or_insert_with(|| BufWriter::new(File::create(name).unwrap()));
             writeln!(&mut file, "{}", change)?;
             Ok(())
         })() {

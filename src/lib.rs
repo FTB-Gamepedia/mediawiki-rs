@@ -1,60 +1,49 @@
-// Copyright © 2016, Peter Atashian
+// Copyright © 2016-2018, Peter Atashian
 
 #![feature(try_trait)]
 
 extern crate cookie;
-extern crate hyper;
+extern crate reqwest;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate url;
 
-use cookie::{CookieJar, ParseError as CookieError};
-use hyper::{Url};
-use hyper::client::request::{Request};
-use hyper::client::response::{Response};
-use hyper::error::Error as HyperError;
-use hyper::header::{ContentType, Cookie, SetCookie, UserAgent};
-use hyper::method::{Method};
-use hyper::status::{StatusCode};
-use serde_json::{Error as ParseError, Value as Json};
-use std::borrow::{Borrow};
-use std::cell::{RefCell};
-use std::collections::{HashMap};
-use std::fs::{File};
-use std::io::{Error as IoError, Write};
-use std::marker::{PhantomData};
-use std::option::NoneError;
-use std::path::{Path};
-use std::thread::{sleep};
-use std::time::{Duration};
-use url::ParseError as UrlError;
-use url::form_urlencoded::{Serializer};
+use cookie::{
+    CookieJar, ParseError as CookieError,
+};
+use reqwest::{
+    Client, Method, StatusCode,
+    Error as ReqwestError,
+    header::{Cookie, SetCookie, UserAgent},
+};
+use serde_json::{
+    Error as ParseError, Value as Json,
+};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fs::File,
+    io::Error as IoError,
+    marker::PhantomData,
+    option::NoneError,
+    path::Path,
+    thread::sleep,
+    time::Duration,
+};
 
 #[derive(Debug)]
 pub enum Error {
     Json(Json),
-    Url(UrlError),
-    Hyper(HyperError),
     Io(IoError),
     Parse(ParseError),
     Cookie(CookieError),
+    Reqwest(ReqwestError),
     None,
 }
 impl From<Json> for Error {
     fn from(err: Json) -> Error {
         Error::Json(err)
-    }
-}
-impl From<UrlError> for Error {
-    fn from(err: UrlError) -> Error {
-        Error::Url(err)
-    }
-}
-impl From<HyperError> for Error {
-    fn from(err: HyperError) -> Error {
-        Error::Hyper(err)
     }
 }
 impl From<IoError> for Error {
@@ -70,6 +59,11 @@ impl From<ParseError> for Error {
 impl From<CookieError> for Error {
     fn from(err: CookieError) -> Error {
         Error::Cookie(err)
+    }
+}
+impl From<ReqwestError> for Error {
+    fn from(err: ReqwestError) -> Error {
+        Error::Reqwest(err)
     }
 }
 impl From<NoneError> for Error {
@@ -88,36 +82,37 @@ pub struct Config {
 pub struct Mediawiki {
     cookies: RefCell<CookieJar>,
     config: Config,
+    client: Client,
 }
 impl Mediawiki {
-    pub fn login(config: Config) -> Result<Mediawiki, Error> {
+    pub fn login_config(config: Config) -> Result<Mediawiki, Error> {
         let mw = Mediawiki {
             cookies: RefCell::new(CookieJar::new()),
             config: config,
+            client: Client::new(),
         };
-        mw.do_login(None)?;
+        mw.login(None)?;
         Ok(mw)
     }
-    pub fn login_file<P: AsRef<Path>>(path: P) -> Result<Mediawiki, Error> {
+    pub fn login_path<P: AsRef<Path>>(path: P) -> Result<Mediawiki, Error> {
         let file = File::open(path)?;
         let config: Config = serde_json::from_reader(file)?;
-        Mediawiki::login(config)
+        Mediawiki::login_config(config)
     }
-    fn do_login(&self, token: Option<&str>) -> Result<(), Error> {
-        let mut args = vec![
-            ("format", "json"),
-            ("action", "login"),
-            ("lgname", &self.config.username),
-            ("lgpassword", &self.config.password)];
+    pub fn login(&self, token: Option<&str>) -> Result<(), Error> {
+        let mut request = self.request();
+        request
+            .arg("action", "login")
+            .arg("lgname", self.config.username.clone())
+            .arg("lgpassword", self.config.password.clone());
         if let Some(token) = token {
-            args.push(("lgtoken", token));
+            request.arg("lgtoken", token);
         }
-        let resp = self.post_request(&self.config.baseapi, &args)?;
-        let json: Json = serde_json::from_reader(resp)?;
+        let json = request.post()?;
         let inner = json.get("login")?;
         let result = inner.get("result")?.as_str()?;
         match result {
-            "NeedToken" => self.do_login(Some(inner.get("token")?.as_str()?)),
+            "NeedToken" => self.login(Some(inner.get("token")?.as_str()?)),
             "Success" => {
                 println!("Logged in to MediaWiki");
                 Ok(())
@@ -125,84 +120,36 @@ impl Mediawiki {
             _ => Err(json.clone().into()),
         }
     }
-    fn do_request(
-        &self, url: Url, method: Method, body: Option<&str>,
-    ) -> Result<Response, Error> {
-        let mut request = Request::new(method, url)?;
-        request.set_read_timeout(Some(Duration::from_secs(60)))?;
-        request.headers_mut().set(UserAgent(self.config.useragent.clone()));
-        request.headers_mut().set(Cookie(self.cookies.borrow().iter().map(|cookie| {
-            format!("{}", cookie)
-        }).collect()));
-        if body.is_some() {
-            request.headers_mut().set(ContentType("application/x-www-form-urlencoded".parse().unwrap()));
-        }
-        let mut request = request.start()?;
-        if let Some(body) = body {
-            request.write_all(body.as_bytes())?;
-        }
-        let response = request.send()?;
-        if let Some(cookies) = response.headers.get::<SetCookie>() {
-            for cookie in &cookies.0 {
-                self.cookies.borrow_mut().add(cookie::Cookie::parse(&**cookie)?.into_owned());
-            }
-        }
-        Ok(response)
-    }
-    fn get_request<I, K, V>(
-        &self, base: &str, args: I,
-    ) -> Result<Response, Error> where
-        I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
-    {
-        let query = Serializer::new(String::new()).extend_pairs(args).finish();
-        let url = Url::parse(&format!("{}?{}", base, query))?;
-        loop {
-            let r = self.do_request(url.clone(), Method::Get, None)?;
-            if r.status == StatusCode::Ok {
-                return Ok(r)
-            }
-            println!("{:?}", r);
-            sleep(Duration::from_secs(5))
-        }
-    }
-    fn post_request<I, K, V>(
-        &self, base: &str, args: I,
-    ) -> Result<Response, Error> where
-        I: IntoIterator, I::Item: Borrow<(K, V)>, K: AsRef<str>, V: AsRef<str>,
-    {
-        let query = Serializer::new(String::new()).extend_pairs(args).finish();
-        let url = Url::parse(base)?;
-        loop {
-            let r = self.do_request(url.clone(), Method::Post, Some(&*query))?;
-            if r.status == StatusCode::Ok {
-                return Ok(r)
-            }
-            println!("{:?}", r);
-            sleep(Duration::from_secs(5))
-        }
-    }
-    pub fn query_recentchanges(&self, limit: u32) -> Query {
-        let mut args: HashMap<String, String> = [
-            ("continue", ""), ("list", "recentchanges"), ("format", "json"),
-            ("action", "query"), ("rcdir", "older"),
-            ("rcprop", "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags"),
-        ].iter().map(|&(a, b)| (a.into(), b.into())).collect();
-        args.insert("limit".into(), limit.to_string());
-        Query {
-            mw: &self,
-            name: "recentchanges".into(),
-            buf: Vec::new(),
-            args: args,
-            done: false,
-        }
+    pub fn request(&self) -> RequestBuilder {
+        RequestBuilder::new(self)
     }
     pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
-        let args = [("format", "json"), ("action", "query"),
-            ("meta", "tokens"), ("type", T::in_type())];
-        let resp = try!(self.get_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
+        let json = self.request()
+            .arg("action", "query")
+            .arg("meta", "tokens")
+            .arg("type", T::in_type())
+            .get()?;
         Ok(Token::new(json.get("query")?.get("tokens")?.get(T::out_type())?.as_str()?))
     }
+    pub fn query<T: Into<String>>(&self, list: T) -> QueryBuilder {
+        let list = list.into();
+        let mut request = self.request();
+        request.arg("action", "query");
+        request.arg("continue", "");
+        request.arg("list", &*list);
+        QueryBuilder {
+            req: request,
+            list: list,
+        }
+    }
+    pub fn query_recentchanges(&self, limit: u32) -> QueryBuilder {
+        let mut query = self.query("recentchanges");
+        query.arg("rcdir", "older");
+        query.arg("rcprop", "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags");
+        query.arg("limit", limit.to_string());
+        query
+    }
+    /*
     pub fn query_tiles(&self, tsmod: Option<&str>) -> Query {
         let mut args: HashMap<String, String> = [
             ("format", "json"), ("action", "query"), ("continue", ""), ("list", "tiles"), ("tslimit", "5000"),
@@ -261,24 +208,99 @@ impl Mediawiki {
         let json: Json = serde_json::from_reader(resp)?;
         Ok(json)
     }
+    */
+}
+pub struct RequestBuilder<'a> {
+    mw: &'a Mediawiki,
+    args: HashMap<String, String>,
+}
+impl<'a> RequestBuilder<'a> {
+    fn new(mw: &'a Mediawiki) -> RequestBuilder<'a> {
+        let mut request = RequestBuilder {
+            mw: mw,
+            args: HashMap::new(),
+        };
+        request.arg("format", "json");
+        request
+    }
+    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self where T: Into<String>, U: Into<String> {
+        self.args.insert(key.into(), val.into());
+        self
+    }
+    fn request(&self, method: Method) -> Result<Json, Error> {
+        let response = loop {
+            let mut request = self.mw.client.request(method.clone(), &self.mw.config.baseapi);
+            request.header(UserAgent::new(self.mw.config.useragent.clone()));
+            let mut cookies = Cookie::new();
+            for cookie in self.mw.cookies.borrow().iter() {
+                cookies.append(cookie.name().to_owned(), cookie.value().to_owned());
+            }
+            request.header(cookies);
+            match method {
+                Method::Get => request.query(&self.args),
+                Method::Post => request.form(&self.args),
+                _ => unreachable!(),
+            };
+            let mut response = request.send()?;
+            if let Some(cookies) = response.headers().get::<SetCookie>() {
+                for cookie in cookies.iter() {
+                    self.mw.cookies.borrow_mut()
+                        .add(cookie::Cookie::parse(&**cookie)?.into_owned());
+                }
+            }
+            if response.status() == StatusCode::Ok {
+                break response;
+            }
+            println!("{:?}", response);
+            sleep(Duration::from_secs(5))
+        };
+        let json: Json = serde_json::from_reader(response)?;
+        Ok(json)
+    }
+    fn post(&self) -> Result<Json, Error> {
+        self.request(Method::Post)
+    }
+    fn get(&self) -> Result<Json, Error> {
+        self.request(Method::Get)
+    }
+}
+pub struct QueryBuilder<'a> {
+    req: RequestBuilder<'a>,
+    list: String,
+}
+impl<'a> QueryBuilder<'a> {
+    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self where T: Into<String>, U: Into<String> {
+        self.req.arg(key, val);
+        self
+    }
+}
+impl<'a> IntoIterator for QueryBuilder<'a> {
+    type Item = Result<Json, Error>;
+    type IntoIter = Query<'a>;
+    fn into_iter(self) -> Query<'a> {
+        Query {
+            req: self.req,
+            list: self.list,
+            buf: Vec::new(),
+            done: false,
+        }
+    }
 }
 pub struct Query<'a> {
-    mw: &'a Mediawiki,
-    name: String,
+    req: RequestBuilder<'a>,
+    list: String,
     buf: Vec<Json>,
-    args: HashMap<String, String>,
     done: bool,
 }
 impl<'a> Query<'a> {
     fn fill(&mut self) -> Result<bool, Error> {
-        let resp = self.mw.get_request(&self.mw.config.baseapi, &self.args)?;
-        let json: Json = serde_json::from_reader(resp)?;
-        let buf = json.get("query")?.get(&self.name)?;
+        let json = self.req.get()?;
+        let buf = json.get("query")?.get(&self.list)?;
         self.buf.clone_from(buf.as_array()?);
         self.buf.reverse();
         if let Some(cont) = json.get("continue") {
             for (key, val) in cont.as_object()? {
-                self.args.insert(key.clone(), val.as_str()?.into());
+                self.req.arg(&**key, val.as_str()?);
             }
             Ok(true)
         } else {

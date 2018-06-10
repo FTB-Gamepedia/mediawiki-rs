@@ -1,9 +1,9 @@
 ﻿// Copyright © 2016, Peter Atashian
 extern crate mediawiki;
-use mediawiki::{Mediawiki};
+use mediawiki::Mediawiki;
 
 fn main() {
-    let mw = Mediawiki::login_file("ftb.json").unwrap();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     println!("{:?}", mw.get_token::<mediawiki::Csrf>());
     println!("{:?}", mw.get_token::<mediawiki::Watch>());
     println!("{:?}", mw.get_token::<mediawiki::Patrol>());
