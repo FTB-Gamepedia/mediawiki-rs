@@ -8,10 +8,11 @@ use std::io::Read;
 
 fn deletetiles(abbr: &str) {
     let path = "Deleted.txt";
-    let mw = Mediawiki::login_file("ftb.json").unwrap();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     let mut file = File::open(path).unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
+    /*
     let map: HashMap<String, u64> = mw.query_tiles(Some(abbr)).map(|tile| {
         let tile = tile.unwrap();
         let tile = tile.as_object().unwrap();
@@ -26,6 +27,7 @@ fn deletetiles(abbr: &str) {
         // println!("{:?}", chunk);
         println!("{:?}", mw.delete_tiles(&token, &chunk));
     }
+    */
 }
 
 fn main() {

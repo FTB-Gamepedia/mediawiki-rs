@@ -24,7 +24,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fs::File,
-    io::Error as IoError,
+    io::{Error as IoError, Read},
     marker::PhantomData,
     option::NoneError,
     path::Path,
@@ -139,7 +139,6 @@ impl Mediawiki {
         let mut request = self.request();
         request.arg("action", "query");
         request.arg("continue", "");
-        request.arg("list", &*list);
         QueryBuilder {
             req: request,
             list: list,
@@ -147,10 +146,38 @@ impl Mediawiki {
     }
     pub fn query_recentchanges(&self, limit: u32) -> QueryBuilder {
         let mut query = self.query("recentchanges");
+        query.arg("list", "recentchanges");
         query.arg("rcdir", "older");
         query.arg("rcprop", "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags");
         query.arg("limit", limit.to_string());
         query
+    }
+    pub fn download_file(&self, name: &str) -> Result<Option<Vec<u8>>, Error> {
+        let mut request = self.request();
+        request.arg("action", "query");
+        request.arg("prop", "imageinfo");
+        request.arg("titles", format!("File:{}", name));
+        request.arg("iiprop", "url");
+        let json = request.get()?;
+        let images = json.get("query")?.get("pages")?;
+        let image = images.as_object()?.values().next()?;
+        if image.get("missing").is_some() {
+            return Ok(None)
+        }
+        let url = image.get("imageinfo")?.get(0)?.get("url")?.as_str()?;
+        let mut response = loop {
+            let mut request = self.client.request(Method::Get, url);
+            request.header(UserAgent::new(self.config.useragent.clone()));
+            let mut response = request.send()?;
+            if response.status() == StatusCode::Ok {
+                break response;
+            }
+            println!("{:?}", response);
+            sleep(Duration::from_secs(5))
+        };
+        let mut buf = Vec::new();
+        response.read_to_end(&mut buf)?;
+        Ok(Some(buf))
     }
 }
 pub struct RequestBuilder<'a> {

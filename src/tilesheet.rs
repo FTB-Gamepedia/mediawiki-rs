@@ -9,6 +9,7 @@ pub trait Tilesheet {
 impl Tilesheet for Mediawiki {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder {
         let mut query = self.query("tiles");
+        query.arg("list", "tiles");
         query.arg("tslimit", "5000");
         if let Some(tsmod) = tsmod {
             query.arg("tsmod", tsmod);

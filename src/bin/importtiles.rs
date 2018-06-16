@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 
 fn import() {
     let path = "All Tiles.txt";
-    let mw = Mediawiki::login_file("ftb.json").unwrap();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     let mut file = BufWriter::new(File::create(path).unwrap());
     for tile in mw.query_tiles(None) {
         let tile = tile.unwrap();

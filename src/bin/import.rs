@@ -7,7 +7,7 @@ use std::io::{Write};
 
 fn import(abbr: &str) {
     let path = format!(r"Tilesheet {}.txt", abbr);
-    let mw = Mediawiki::login_file("ftb.json").unwrap();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     let mut file = File::create(path).unwrap();
     for tile in mw.query_tiles(Some(abbr)) {
         let tile = tile.unwrap();
