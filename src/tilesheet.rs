@@ -5,6 +5,7 @@ use {
 pub trait Tilesheet {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder;
     fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error>;
+    fn query_sheets(&self) -> QueryBuilder;
 }
 impl Tilesheet for Mediawiki {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder {
@@ -14,6 +15,12 @@ impl Tilesheet for Mediawiki {
         if let Some(tsmod) = tsmod {
             query.arg("tsmod", tsmod);
         }
+        query
+    }
+    fn query_sheets(&self) -> QueryBuilder {
+        let mut query = self.query("tilesheets");
+        query.arg("list", "tilesheets");
+        query.arg("tslimit", "5000");
         query
     }
     fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error> {
