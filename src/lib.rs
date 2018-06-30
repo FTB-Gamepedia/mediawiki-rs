@@ -16,6 +16,7 @@ use reqwest::{
     Client, Method, StatusCode,
     Error as ReqwestError,
     header::{Cookie, SetCookie, UserAgent},
+    multipart::Form,
 };
 use serde_json::{
     Error as ParseError, Value as Json,
@@ -42,6 +43,7 @@ pub enum Error {
     Parse(ParseError),
     Cookie(CookieError),
     Reqwest(ReqwestError),
+    Status(String),
     None,
 }
 impl From<Json> for Error {
@@ -69,6 +71,11 @@ impl From<ReqwestError> for Error {
         Error::Reqwest(err)
     }
 }
+impl From<String> for Error {
+    fn from(err: String) -> Error {
+        Error::Status(err)
+    }
+}
 impl From<NoneError> for Error {
     fn from(_: NoneError) -> Error {
         Error::None
@@ -94,7 +101,7 @@ impl Mediawiki {
             config: config,
             client: Client::new(),
         };
-        mw.login(None)?;
+        mw.login()?;
         Ok(mw)
     }
     pub fn login_path<P: AsRef<Path>>(path: P) -> Result<Mediawiki, Error> {
@@ -102,20 +109,18 @@ impl Mediawiki {
         let config: Config = serde_json::from_reader(file)?;
         Mediawiki::login_config(config)
     }
-    pub fn login(&self, token: Option<&str>) -> Result<(), Error> {
+    pub fn login(&self) -> Result<(), Error> {
+        let token = self.get_token::<Login>()?;
         let mut request = self.request();
         request
             .arg("action", "login")
             .arg("lgname", self.config.username.clone())
-            .arg("lgpassword", self.config.password.clone());
-        if let Some(token) = token {
-            request.arg("lgtoken", token);
-        }
+            .arg("lgpassword", self.config.password.clone())
+            .arg("lgtoken", &*token.0);
         let json = request.post()?;
         let inner = json.get("login")?;
         let result = inner.get("result")?.as_str()?;
         match result {
-            "NeedToken" => self.login(Some(inner.get("token")?.as_str()?)),
             "Success" => {
                 println!("Logged in to MediaWiki");
                 Ok(())
@@ -179,6 +184,18 @@ impl Mediawiki {
         response.read_to_end(&mut buf)?;
         Ok(Some(buf))
     }
+    pub fn upload_file(
+        &self, name: &str, file: &Path, token: &Token<Csrf>,
+    ) -> Result<Json, Error> {
+        let request = self.request();
+        let form = Form::new()
+            .text("format", "json")
+            .text("action", "upload")
+            .text("filename", name.to_owned())
+            .text("token", token.0.clone())
+            .file("file", file)?;
+        request.multipart(form)
+    }
 }
 pub struct RequestBuilder<'a> {
     mw: &'a Mediawiki,
@@ -197,41 +214,57 @@ impl<'a> RequestBuilder<'a> {
         self.args.insert(key.into(), val.into());
         self
     }
-    fn request(&self, method: Method) -> Result<Json, Error> {
-        let response = loop {
-            let mut request = self.mw.client.request(method.clone(), &self.mw.config.baseapi);
-            request.header(UserAgent::new(self.mw.config.useragent.clone()));
-            let mut cookies = Cookie::new();
-            for cookie in self.mw.cookies.borrow().iter() {
-                cookies.append(cookie.name().to_owned(), cookie.value().to_owned());
-            }
-            request.header(cookies);
-            match method {
-                Method::Get => request.query(&self.args),
-                Method::Post => request.form(&self.args),
-                _ => unreachable!(),
-            };
-            let mut response = request.send()?;
-            if let Some(cookies) = response.headers().get::<SetCookie>() {
-                for cookie in cookies.iter() {
-                    self.mw.cookies.borrow_mut()
-                        .add(cookie::Cookie::parse(&**cookie)?.into_owned());
-                }
-            }
-            if response.status() == StatusCode::Ok {
-                break response;
-            }
-            println!("{:?}", response);
-            sleep(Duration::from_secs(5))
+    fn request(&self, method: Method, multipart: Option<Form>) -> Result<Json, Error> {
+        let mut request = self.mw.client.request(method.clone(), &self.mw.config.baseapi);
+        request.header(UserAgent::new(self.mw.config.useragent.clone()));
+        let mut cookies = Cookie::new();
+        for cookie in self.mw.cookies.borrow().iter() {
+            cookies.append(cookie.name().to_owned(), cookie.value().to_owned());
+        }
+        request.header(cookies);
+        match (multipart, &method) {
+            (Some(multipart), Method::Post) => request.multipart(multipart),
+            (None, Method::Get) => request.query(&self.args),
+            (None, Method::Post) => request.form(&self.args),
+            _ => unreachable!(),
         };
-        let json: Json = serde_json::from_reader(response)?;
-        Ok(json)
+        let mut response = request.send()?;
+        if let Some(cookies) = response.headers().get::<SetCookie>() {
+            for cookie in cookies.iter() {
+                self.mw.cookies.borrow_mut()
+                    .add(cookie::Cookie::parse(&**cookie)?.into_owned());
+            }
+        }
+        let status = response.status();
+        if status.is_success() {
+            let text = response.text()?;
+            //println!("{}", text);
+            let json: Json = serde_json::from_str(&text)?;
+            Ok(json)
+        } else {
+            let text = response.text()?;
+            println!("{:?}", text);
+            Err(status.to_string().into())
+        }
     }
     fn post(&self) -> Result<Json, Error> {
-        self.request(Method::Post)
+        loop {
+            match self.request(Method::Post, None) {
+                Ok(json) => return Ok(json),
+                Err(status) => println!("{:?}", status),
+            }
+        }
     }
     fn get(&self) -> Result<Json, Error> {
-        self.request(Method::Get)
+        loop {
+            match self.request(Method::Get, None) {
+                Ok(json) => return Ok(json),
+                Err(status) => println!("{:?}", status),
+            }
+        }
+    }
+    fn multipart(&self, multipart: Form) -> Result<Json, Error> {
+        self.request(Method::Post, Some(multipart))
     }
 }
 pub struct QueryBuilder<'a> {
@@ -326,4 +359,9 @@ impl TokenType for Rollback {
 impl TokenType for UserRights {
     fn in_type() -> &'static str { "userrights" }
     fn out_type() -> &'static str { "userrightstoken" }
+}
+#[derive(Debug)] pub struct Login;
+impl TokenType for Login {
+    fn in_type() -> &'static str { "login" }
+    fn out_type() -> &'static str { "logintoken" }
 }

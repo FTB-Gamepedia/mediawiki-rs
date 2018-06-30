@@ -4,8 +4,10 @@ use {
 };
 pub trait Tilesheet {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder;
+    fn add_tiles(&self, token: &Token<Csrf>, tsmod: &str, tsimport: &str) -> Result<Json, Error>;
     fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error>;
     fn query_sheets(&self) -> QueryBuilder;
+    fn create_sheet(&self, token: &Token<Csrf>, tsmod: &str, tssizes: &str) -> Result<Json, Error>;
 }
 impl Tilesheet for Mediawiki {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder {
@@ -30,28 +32,24 @@ impl Tilesheet for Mediawiki {
         request.arg("tsids", ids);
         request.post()
     }
-    /*
-    pub fn add_tiles(
+    fn add_tiles(
         &self, token: &Token<Csrf>, tsmod: &str, tsimport: &str,
     ) -> Result<Json, Error> {
-        let args = [
-            ("format", "json"), ("action", "addtiles"), ("tstoken", &*token.0), ("tsmod", tsmod),
-            ("tsimport", tsimport),
-        ];
-        let resp = try!(self.post_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
-        Ok(json)
+        let mut request = self.request();
+        request.arg("action", "addtiles");
+        request.arg("tstoken", &*token.0);
+        request.arg("tsmod", tsmod);
+        request.arg("tsimport", tsimport);
+        request.post()
     }
-    pub fn create_sheet(
+    fn create_sheet(
         &self, token: &Token<Csrf>, tsmod: &str, tssizes: &str
     ) -> Result<Json, Error> {
-        let args = [
-            ("format", "json"), ("action", "createsheet"), ("tstoken", &*token.0),
-            ("tsmod", tsmod), ("tssizes", tssizes),
-        ];
-        let resp = try!(self.post_request(&self.config.baseapi, &args));
-        let json: Json = serde_json::from_reader(resp)?;
-        Ok(json)
+        let mut request = self.request();
+        request.arg("action", "createsheet");
+        request.arg("tstoken", &*token.0);
+        request.arg("tsmod", tsmod);
+        request.arg("tssizes", tssizes);
+        request.post()
     }
-    */
 }

@@ -1,6 +1,6 @@
 ﻿// Copyright © 2016, Peter Atashian
 extern crate mediawiki;
-use mediawiki::{Mediawiki};
+use mediawiki::{Mediawiki, tilesheet::Tilesheet};
 use std::env::args;
 use std::fs::{File};
 use std::io::{Write};

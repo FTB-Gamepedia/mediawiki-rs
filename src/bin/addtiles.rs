@@ -18,7 +18,6 @@ fn addtiles(abbr: &str) {
     file.read_to_string(&mut s).unwrap();
     let reg = Regex::new(r"(\d+) (\d+) (.+)").unwrap();
     let token = mw.get_token::<Csrf>().unwrap();
-    /*
     println!("{:?}", mw.create_sheet(&token, abbr, "16|32").unwrap());
     let tiles = s.lines().map(|line| {
         let cap = reg.captures(line).unwrap();
@@ -31,7 +30,6 @@ fn addtiles(abbr: &str) {
         let chunk = chunk.join("|");
         println!("{:?}", mw.add_tiles(&token, abbr, &chunk));
     }
-    */
 }
 
 fn main() {

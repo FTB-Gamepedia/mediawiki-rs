@@ -1,6 +1,6 @@
 // Copyright © 2016, Peter Atashian
 extern crate mediawiki;
-use mediawiki::{Csrf, Mediawiki};
+use mediawiki::{Csrf, Mediawiki, tilesheet::Tilesheet};
 use std::collections::HashMap;
 use std::env::args;
 use std::fs::File;
@@ -12,7 +12,6 @@ fn deletetiles(abbr: &str) {
     let mut file = File::open(path).unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
-    /*
     let map: HashMap<String, u64> = mw.query_tiles(Some(abbr)).map(|tile| {
         let tile = tile.unwrap();
         let tile = tile.as_object().unwrap();
@@ -27,7 +26,6 @@ fn deletetiles(abbr: &str) {
         // println!("{:?}", chunk);
         println!("{:?}", mw.delete_tiles(&token, &chunk));
     }
-    */
 }
 
 fn main() {
