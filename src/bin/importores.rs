@@ -1,5 +1,5 @@
 ﻿extern crate mediawiki;
-use mediawiki::Mediawiki;
+use mediawiki::{Mediawiki, oredict::Oredict};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 

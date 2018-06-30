@@ -12,7 +12,7 @@ fn deletetiles(abbr: &str) {
     let mut file = File::open(path).unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
-    let map: HashMap<String, u64> = mw.query_tiles(Some(abbr)).map(|tile| {
+    let map: HashMap<String, u64> = mw.query_tiles(Some(abbr)).into_iter().map(|tile| {
         let tile = tile.unwrap();
         let tile = tile.as_object().unwrap();
         let name = tile["name"].as_str().unwrap();
