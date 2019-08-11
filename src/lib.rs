@@ -1,26 +1,13 @@
-// Copyright © 2016-2018, Peter Atashian
-
 #![feature(try_trait)]
 
-extern crate cookie;
-extern crate reqwest;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-
-use cookie::{
-    CookieJar, ParseError as CookieError,
-};
+use cookie::{Cookie, CookieJar, ParseError as CookieError};
 use reqwest::{
-    Client, Method, StatusCode,
-    Error as ReqwestError,
-    header::{Cookie, SetCookie, UserAgent},
+    header::{COOKIE, SET_COOKIE, USER_AGENT},
     multipart::Form,
+    Client, Error as ReqwestError, Method, StatusCode,
 };
-use serde_json::{
-    Error as ParseError, Value as Json,
-};
+use serde::Deserialize;
+use serde_json::{Error as ParseError, Value as Json};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -33,8 +20,8 @@ use std::{
     time::Duration,
 };
 
-pub mod tilesheet;
 pub mod oredict;
+pub mod tilesheet;
 
 #[derive(Debug)]
 pub enum Error {
@@ -116,7 +103,7 @@ impl Mediawiki {
             .arg("action", "login")
             .arg("lgname", self.config.username.clone())
             .arg("lgpassword", self.config.password.clone())
-            .arg("lgtoken", &*token.0);
+            .arg("lgtoken", token.value());
         let json = request.post()?;
         let inner = json.get("login")?;
         let result = inner.get("result")?.as_str()?;
@@ -124,20 +111,29 @@ impl Mediawiki {
             "Success" => {
                 println!("Logged in to MediaWiki");
                 Ok(())
-            },
+            }
             _ => Err(json.clone().into()),
         }
     }
     pub fn request(&self) -> RequestBuilder {
         RequestBuilder::new(self)
     }
-    pub fn get_token<T>(&self) -> Result<Token<T>, Error> where T: TokenType {
-        let json = self.request()
+    pub fn get_token<T>(&self) -> Result<Token<T>, Error>
+    where
+        T: TokenType,
+    {
+        let json = self
+            .request()
             .arg("action", "query")
             .arg("meta", "tokens")
             .arg("type", T::in_type())
             .get()?;
-        Ok(Token::new(json.get("query")?.get("tokens")?.get(T::out_type())?.as_str()?))
+        Ok(Token::new(
+            json.get("query")?
+                .get("tokens")?
+                .get(T::out_type())?
+                .as_str()?,
+        ))
     }
     pub fn query<T: Into<String>>(&self, list: T) -> QueryBuilder {
         let list = list.into();
@@ -153,7 +149,10 @@ impl Mediawiki {
         let mut query = self.query("recentchanges");
         query.arg("list", "recentchanges");
         query.arg("rcdir", "older");
-        query.arg("rcprop", "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags");
+        query.arg(
+            "rcprop",
+            "user|userid|comment|timestamp|title|ids|sha1|sizes|redirect|loginfo|tags|flags",
+        );
         query.arg("limit", limit.to_string());
         query
     }
@@ -167,14 +166,14 @@ impl Mediawiki {
         let images = json.get("query")?.get("pages")?;
         let image = images.as_object()?.values().next()?;
         if image.get("missing").is_some() {
-            return Ok(None)
+            return Ok(None);
         }
         let url = image.get("imageinfo")?.get(0)?.get("url")?.as_str()?;
         let mut response = loop {
-            let mut request = self.client.request(Method::Get, url);
-            request.header(UserAgent::new(self.config.useragent.clone()));
-            let mut response = request.send()?;
-            if response.status() == StatusCode::Ok {
+            let mut request = self.client.request(Method::GET, url);
+            request = request.header(USER_AGENT, &*self.config.useragent);
+            let response = request.send()?;
+            if response.status() == StatusCode::OK {
                 break response;
             }
             println!("{:?}", response);
@@ -184,9 +183,7 @@ impl Mediawiki {
         response.read_to_end(&mut buf)?;
         Ok(Some(buf))
     }
-    pub fn upload_file(
-        &self, name: &str, file: &Path, token: &Token<Csrf>,
-    ) -> Result<Json, Error> {
+    pub fn upload_file(&self, name: &str, file: &Path, token: &Token<Csrf>) -> Result<Json, Error> {
         let request = self.request();
         let form = Form::new()
             .text("format", "json")
@@ -197,6 +194,7 @@ impl Mediawiki {
         request.multipart(form)
     }
 }
+
 pub struct RequestBuilder<'a> {
     mw: &'a Mediawiki,
     args: HashMap<String, String>,
@@ -210,30 +208,44 @@ impl<'a> RequestBuilder<'a> {
         request.arg("format", "json");
         request
     }
-    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self where T: Into<String>, U: Into<String> {
+    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self
+    where
+        T: Into<String>,
+        U: Into<String>,
+    {
         self.args.insert(key.into(), val.into());
         self
     }
     fn request(&self, method: Method, multipart: Option<Form>) -> Result<Json, Error> {
-        let mut request = self.mw.client.request(method.clone(), &self.mw.config.baseapi);
-        request.header(UserAgent::new(self.mw.config.useragent.clone()));
-        let mut cookies = Cookie::new();
-        for cookie in self.mw.cookies.borrow().iter() {
-            cookies.append(cookie.name().to_owned(), cookie.value().to_owned());
-        }
-        request.header(cookies);
-        match (multipart, &method) {
-            (Some(multipart), Method::Post) => request.multipart(multipart),
-            (None, Method::Get) => request.query(&self.args),
-            (None, Method::Post) => request.form(&self.args),
+        let mut request = self
+            .mw
+            .client
+            .request(method.clone(), &self.mw.config.baseapi);
+        request = request.header(USER_AGENT, &*self.mw.config.useragent);
+        let cookies = self
+            .mw
+            .cookies
+            .borrow()
+            .iter()
+            .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
+            .collect::<Vec<_>>();
+        request = request.header(COOKIE, cookies.join("; "));
+        request = match (multipart, method) {
+            (Some(multipart), Method::POST) => request.multipart(multipart),
+            (None, Method::GET) => request.query(&self.args),
+            (None, Method::POST) => request.form(&self.args),
             _ => unreachable!(),
         };
+        //let request = request.build()?;
+        //println!("{:?}", request);
+        //println!("{:?}", request.body());
+        //let mut response = self.mw.client.execute(request)?;
         let mut response = request.send()?;
-        if let Some(cookies) = response.headers().get::<SetCookie>() {
-            for cookie in cookies.iter() {
-                self.mw.cookies.borrow_mut()
-                    .add(cookie::Cookie::parse(&**cookie)?.into_owned());
-            }
+        for cookie in response.headers().get_all(SET_COOKIE) {
+            self.mw
+                .cookies
+                .borrow_mut()
+                .add(Cookie::parse(String::from_utf8_lossy(cookie.as_bytes()))?.into_owned());
         }
         let status = response.status();
         if status.is_success() {
@@ -249,7 +261,7 @@ impl<'a> RequestBuilder<'a> {
     }
     fn post(&self) -> Result<Json, Error> {
         loop {
-            match self.request(Method::Post, None) {
+            match self.request(Method::POST, None) {
                 Ok(json) => return Ok(json),
                 Err(status) => println!("{:?}", status),
             }
@@ -257,14 +269,14 @@ impl<'a> RequestBuilder<'a> {
     }
     fn get(&self) -> Result<Json, Error> {
         loop {
-            match self.request(Method::Get, None) {
+            match self.request(Method::GET, None) {
                 Ok(json) => return Ok(json),
                 Err(status) => println!("{:?}", status),
             }
         }
     }
     fn multipart(&self, multipart: Form) -> Result<Json, Error> {
-        self.request(Method::Post, Some(multipart))
+        self.request(Method::POST, Some(multipart))
     }
 }
 pub struct QueryBuilder<'a> {
@@ -272,7 +284,11 @@ pub struct QueryBuilder<'a> {
     list: String,
 }
 impl<'a> QueryBuilder<'a> {
-    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self where T: Into<String>, U: Into<String> {
+    pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self
+    where
+        T: Into<String>,
+        U: Into<String>,
+    {
         self.req.arg(key, val);
         self
     }
@@ -315,7 +331,9 @@ impl<'a> Iterator for Query<'a> {
     type Item = Result<Json, Error>;
     fn next(&mut self) -> Option<Result<Json, Error>> {
         if self.buf.is_empty() {
-            if self.done { return None }
+            if self.done {
+                return None;
+            }
             match self.fill() {
                 Err(e) => return Some(Err(e)),
                 Ok(false) => self.done = true,
@@ -329,39 +347,83 @@ pub trait TokenType {
     fn in_type() -> &'static str;
     fn out_type() -> &'static str;
 }
-#[derive(Debug)] pub struct Token<T>(String, PhantomData<T>);
+#[derive(Debug)]
+pub struct Token<T>(String, PhantomData<T>);
 impl<T> Token<T> {
     fn new(token: &str) -> Token<T> {
         Token(token.to_owned(), PhantomData)
     }
+    fn value(&self) -> &str {
+        &*self.0
+    }
 }
-#[derive(Debug)] pub struct Csrf;
+#[derive(Debug)]
+pub struct CreateAccount;
+impl TokenType for CreateAccount {
+    fn in_type() -> &'static str {
+        "createaccount"
+    }
+    fn out_type() -> &'static str {
+        "createaccounttoken"
+    }
+}
+#[derive(Debug)]
+pub struct Csrf;
 impl TokenType for Csrf {
-    fn in_type() -> &'static str { "csrf" }
-    fn out_type() -> &'static str { "csrftoken" }
+    fn in_type() -> &'static str {
+        "csrf"
+    }
+    fn out_type() -> &'static str {
+        "csrftoken"
+    }
 }
-#[derive(Debug)] pub struct Watch;
-impl TokenType for Watch {
-    fn in_type() -> &'static str { "watch" }
-    fn out_type() -> &'static str { "watchtoken" }
-}
-#[derive(Debug)] pub struct Patrol;
-impl TokenType for Patrol {
-    fn in_type() -> &'static str { "patrol" }
-    fn out_type() -> &'static str { "patroltoken" }
-}
-#[derive(Debug)] pub struct Rollback;
-impl TokenType for Rollback {
-    fn in_type() -> &'static str { "rollback" }
-    fn out_type() -> &'static str { "rollbacktoken" }
-}
-#[derive(Debug)] pub struct UserRights;
-impl TokenType for UserRights {
-    fn in_type() -> &'static str { "userrights" }
-    fn out_type() -> &'static str { "userrightstoken" }
-}
-#[derive(Debug)] pub struct Login;
+#[derive(Debug)]
+pub struct Login;
 impl TokenType for Login {
-    fn in_type() -> &'static str { "login" }
-    fn out_type() -> &'static str { "logintoken" }
+    fn in_type() -> &'static str {
+        "login"
+    }
+    fn out_type() -> &'static str {
+        "logintoken"
+    }
+}
+#[derive(Debug)]
+pub struct Patrol;
+impl TokenType for Patrol {
+    fn in_type() -> &'static str {
+        "patrol"
+    }
+    fn out_type() -> &'static str {
+        "patroltoken"
+    }
+}
+#[derive(Debug)]
+pub struct Rollback;
+impl TokenType for Rollback {
+    fn in_type() -> &'static str {
+        "rollback"
+    }
+    fn out_type() -> &'static str {
+        "rollbacktoken"
+    }
+}
+#[derive(Debug)]
+pub struct UserRights;
+impl TokenType for UserRights {
+    fn in_type() -> &'static str {
+        "userrights"
+    }
+    fn out_type() -> &'static str {
+        "userrightstoken"
+    }
+}
+#[derive(Debug)]
+pub struct Watch;
+impl TokenType for Watch {
+    fn in_type() -> &'static str {
+        "watch"
+    }
+    fn out_type() -> &'static str {
+        "watchtoken"
+    }
 }

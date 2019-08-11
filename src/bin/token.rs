@@ -1,6 +1,4 @@
-﻿// Copyright © 2016, Peter Atashian
-extern crate mediawiki;
-use mediawiki::Mediawiki;
+﻿use mediawiki::Mediawiki;
 
 fn main() {
     let mw = Mediawiki::login_path("ftb.json").unwrap();

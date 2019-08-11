@@ -1,7 +1,5 @@
-﻿// Copyright © 2016, Peter Atashian
-extern crate mediawiki;
 use mediawiki::{Error, Mediawiki};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::fs::{create_dir, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -23,7 +21,8 @@ fn main() {
             } else {
                 base.join(kind).with_extension("json")
             };
-            let mut file = files.entry(name.clone())
+            let mut file = files
+                .entry(name.clone())
                 .or_insert_with(|| BufWriter::new(File::create(name).unwrap()));
             writeln!(&mut file, "{}", change)?;
             Ok(())
