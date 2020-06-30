@@ -85,7 +85,7 @@ impl Mediawiki {
     pub fn login_config(config: Config) -> Result<Mediawiki, Error> {
         let mw = Mediawiki {
             cookies: RefCell::new(CookieJar::new()),
-            config: config,
+            config,
             client: Client::new(),
         };
         mw.login()?;
@@ -142,7 +142,7 @@ impl Mediawiki {
         request.arg("continue", "");
         QueryBuilder {
             req: request,
-            list: list,
+            list,
         }
     }
     pub fn query_recentchanges(&self, limit: u32) -> QueryBuilder {
@@ -194,7 +194,7 @@ impl Mediawiki {
         request.multipart(form)
     }
 }
-
+#[derive(Clone)]
 pub struct RequestBuilder<'a> {
     mw: &'a Mediawiki,
     args: HashMap<String, String>,
@@ -202,7 +202,7 @@ pub struct RequestBuilder<'a> {
 impl<'a> RequestBuilder<'a> {
     fn new(mw: &'a Mediawiki) -> RequestBuilder<'a> {
         let mut request = RequestBuilder {
-            mw: mw,
+            mw,
             args: HashMap::new(),
         };
         request.arg("format", "json");
@@ -259,7 +259,7 @@ impl<'a> RequestBuilder<'a> {
             Err(status.to_string().into())
         }
     }
-    fn post(&self) -> Result<Json, Error> {
+    pub fn post(&self) -> Result<Json, Error> {
         loop {
             match self.request(Method::POST, None) {
                 Ok(json) => return Ok(json),
@@ -267,7 +267,7 @@ impl<'a> RequestBuilder<'a> {
             }
         }
     }
-    fn get(&self) -> Result<Json, Error> {
+    pub fn get(&self) -> Result<Json, Error> {
         loop {
             match self.request(Method::GET, None) {
                 Ok(json) => return Ok(json),
@@ -279,6 +279,7 @@ impl<'a> RequestBuilder<'a> {
         self.request(Method::POST, Some(multipart))
     }
 }
+#[derive(Clone)]
 pub struct QueryBuilder<'a> {
     req: RequestBuilder<'a>,
     list: String,
@@ -340,7 +341,7 @@ impl<'a> Iterator for Query<'a> {
                 Ok(true) => (),
             }
         }
-        self.buf.pop().map(|c| Ok(c))
+        self.buf.pop().map(Ok)
     }
 }
 pub trait TokenType {

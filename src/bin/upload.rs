@@ -1,5 +1,4 @@
-use mediawiki::{Csrf, Mediawiki};
-use regex::Regex;
+use mediawiki::Mediawiki;
 use std::path::Path;
 
 fn main() {
