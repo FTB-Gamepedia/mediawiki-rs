@@ -2,9 +2,9 @@
 
 use cookie::{Cookie, CookieJar, ParseError as CookieError};
 use reqwest::{
+    blocking::{multipart::Form, Client},
     header::{COOKIE, SET_COOKIE, USER_AGENT},
-    multipart::Form,
-    Client, Error as ReqwestError, Method, StatusCode,
+    Error as ReqwestError, Method, StatusCode,
 };
 use serde::Deserialize;
 use serde_json::{Error as ParseError, Value as Json};
@@ -237,7 +237,7 @@ impl<'a> RequestBuilder<'a> {
         //println!("{:?}", request);
         //println!("{:?}", request.body());
         //let mut response = self.mw.client.execute(request)?;
-        let mut response = request.send()?;
+        let response = request.send()?;
         for cookie in response.headers().get_all(SET_COOKIE) {
             self.mw
                 .cookies
