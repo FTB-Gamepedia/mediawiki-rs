@@ -140,10 +140,7 @@ impl Mediawiki {
         let mut request = self.request();
         request.arg("action", "query");
         request.arg("continue", "");
-        QueryBuilder {
-            req: request,
-            list,
-        }
+        QueryBuilder { req: request, list }
     }
     pub fn query_recentchanges(&self, limit: u32) -> QueryBuilder {
         let mut query = self.query("recentchanges");
