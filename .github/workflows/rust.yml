@@ -13,6 +13,8 @@ jobs:
       with:
         toolchain: ${{ matrix.toolchain }}
         default: true
+        profile: minimal
+        components: clippy, rustfmt
     - name: Build
       run: cargo build
     - name: Run tests
