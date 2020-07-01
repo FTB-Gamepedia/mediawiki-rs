@@ -192,6 +192,7 @@ impl Mediawiki {
             .text("action", "upload")
             .text("filename", name.to_owned())
             .text("token", token.0.clone())
+            .text("errorformat", "plaintext")
             .text("text", text.unwrap_or("").to_string());
         if ignore_warnings {
             form.text("ignorewarnings", ignore_warnings.to_string())
@@ -216,7 +217,7 @@ impl Mediawiki {
     pub fn upload_filekey(
         &self,
         name: &str,
-        filekey: &'static str,
+        filekey: &str,
         token: &Token<Csrf>,
         text: Option<&str>,
         ignore_warnings: bool,
@@ -224,7 +225,7 @@ impl Mediawiki {
         let request = self.request();
         let form = self
             .create_upload_form(name, token, text, ignore_warnings)
-            .text("filekey", filekey);
+            .text("filekey", filekey.clone());
         request.multipart(form)
     }
     pub fn upload_file_url(
