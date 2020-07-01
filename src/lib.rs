@@ -225,7 +225,7 @@ impl Mediawiki {
         let request = self.request();
         let form = self
             .create_upload_form(name, token, text, ignore_warnings)
-            .text("filekey", filekey.clone());
+            .text("filekey", filekey.to_owned());
         request.multipart(form)
     }
     pub fn upload_file_url(
