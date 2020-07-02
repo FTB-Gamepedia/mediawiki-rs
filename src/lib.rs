@@ -231,7 +231,7 @@ impl Mediawiki {
     pub fn upload_file_url(
         &self,
         name: &str,
-        url: &'static str,
+        url: &str,
         token: &Token<Csrf>,
         text: Option<&str>,
         ignore_warnings: bool,
@@ -239,7 +239,7 @@ impl Mediawiki {
         let request = self.request();
         let form = self
             .create_upload_form(name, token, text, ignore_warnings)
-            .text("url", url);
+            .text("url", url.to_string());
         request.multipart(form)
     }
 }
