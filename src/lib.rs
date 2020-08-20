@@ -180,14 +180,35 @@ impl Mediawiki {
         response.read_to_end(&mut buf)?;
         Ok(Some(buf))
     }
-    pub fn upload_file(&self, name: &str, file: &Path, token: &Token<Csrf>) -> Result<Json, Error> {
+    pub fn upload(
+        &self,
+        filename: &str,
+        token: &Token<Csrf>,
+        file: Upload,
+        text: Option<&str>,
+        comment: Option<&str>,
+        ignorewarnings: bool,
+    ) -> Result<Json, Error> {
         let request = self.request();
-        let form = Form::new()
+        let mut form = Form::new()
             .text("format", "json")
             .text("action", "upload")
-            .text("filename", name.to_owned())
-            .text("token", token.0.clone())
-            .file("file", file)?;
+            .text("filename", filename.to_owned())
+            .text("token", token.0.clone());
+        if let Some(text) = text {
+            form = form.text("text", text.to_owned());
+        }
+        if let Some(comment) = comment {
+            form = form.text("comment", comment.to_owned());
+        }
+        if ignorewarnings {
+            form = form.text("ignorewarnings", "true");
+        }
+        form = match file {
+            Upload::File(file) => form.file("file", file)?,
+            Upload::Filekey(filekey) => form.text("filekey", filekey.to_owned()),
+            Upload::Url(url) => form.text("url", url.to_owned()),
+        };
         request.multipart(form)
     }
 }
@@ -275,6 +296,11 @@ impl<'a> RequestBuilder<'a> {
     fn multipart(&self, multipart: Form) -> Result<Json, Error> {
         self.request(Method::POST, Some(multipart))
     }
+}
+pub enum Upload<'a> {
+    File(&'a Path),
+    Filekey(&'a str),
+    Url(&'a str),
 }
 #[derive(Clone)]
 pub struct QueryBuilder<'a> {

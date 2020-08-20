@@ -21,7 +21,7 @@ fn import() {
         })
         .collect();
     let mut todelete: Vec<String> = Vec::new();
-    for ore in mw.query_ores() {
+    for ore in mw.query_ores(None) {
         let ore = ore.unwrap();
         let ore = ore.as_object().unwrap();
         let tag_name = ore["tag_name"].as_str().unwrap();
