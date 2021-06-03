@@ -1,19 +1,46 @@
 use crate::{Csrf, Error, Json, Mediawiki, QueryBuilder, Token};
 pub trait Tilesheet {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder;
-    fn add_tiles(&self, token: &Token<Csrf>, tsmod: &str, tsimport: &str) -> Result<Json, Error>;
-    fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error>;
+    fn add_tiles(
+        &self,
+        token: &Token<Csrf>,
+        tsmod: &str,
+        tsimport: &str,
+        summary: Option<&str>,
+    ) -> Result<Json, Error>;
+    fn delete_sheet(
+        &self,
+        token: &Token<Csrf>,
+        tsmods: &str,
+        tssummary: Option<&str>,
+    ) -> Result<Json, Error>;
+    fn delete_tiles(
+        &self,
+        token: &Token<Csrf>,
+        tsids: &str,
+        summary: Option<&str>,
+    ) -> Result<Json, Error>;
     fn query_sheets(&self) -> QueryBuilder;
     fn create_sheet(&self, token: &Token<Csrf>, tsmod: &str, tssizes: &str) -> Result<Json, Error>;
+    #[allow(clippy::too_many_arguments)]
+    fn edit_tile(
+        &self,
+        token: &Token<Csrf>,
+        id: &str,
+        summary: Option<&str>,
+        toname: Option<&str>,
+        tomod: Option<&str>,
+        tox: Option<&str>,
+        toy: Option<&str>,
+        toz: Option<&str>,
+    ) -> Result<Json, Error>;
 }
 impl Tilesheet for Mediawiki {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder {
         let mut query = self.query("tiles");
         query.arg("list", "tiles");
         query.arg("tslimit", "5000");
-        if let Some(tsmod) = tsmod {
-            query.arg("tsmod", tsmod);
-        }
+        query.argo("tsmod", tsmod);
         query
     }
     fn query_sheets(&self) -> QueryBuilder {
@@ -22,19 +49,45 @@ impl Tilesheet for Mediawiki {
         query.arg("tslimit", "5000");
         query
     }
-    fn delete_tiles(&self, token: &Token<Csrf>, ids: &str) -> Result<Json, Error> {
+    fn delete_sheet(
+        &self,
+        token: &Token<Csrf>,
+        tsmods: &str,
+        tssummary: Option<&str>,
+    ) -> Result<Json, Error> {
+        let mut request = self.request();
+        request.arg("action", "deletesheet");
+        request.arg("tstoken", &*token.0);
+        request.arg("tsmods", tsmods);
+        request.argo("tssummary", tssummary);
+        request.post()
+    }
+    fn delete_tiles(
+        &self,
+        token: &Token<Csrf>,
+        tsids: &str,
+        summary: Option<&str>,
+    ) -> Result<Json, Error> {
         let mut request = self.request();
         request.arg("action", "deletetiles");
         request.arg("tstoken", &*token.0);
-        request.arg("tsids", ids);
+        request.arg("tsids", tsids);
+        request.argo("tssummary", summary);
         request.post()
     }
-    fn add_tiles(&self, token: &Token<Csrf>, tsmod: &str, tsimport: &str) -> Result<Json, Error> {
+    fn add_tiles(
+        &self,
+        token: &Token<Csrf>,
+        tsmod: &str,
+        tsimport: &str,
+        summary: Option<&str>,
+    ) -> Result<Json, Error> {
         let mut request = self.request();
         request.arg("action", "addtiles");
         request.arg("tstoken", &*token.0);
         request.arg("tsmod", tsmod);
         request.arg("tsimport", tsimport);
+        request.argo("tssummary", summary);
         request.post()
     }
     fn create_sheet(&self, token: &Token<Csrf>, tsmod: &str, tssizes: &str) -> Result<Json, Error> {
@@ -43,6 +96,29 @@ impl Tilesheet for Mediawiki {
         request.arg("tstoken", &*token.0);
         request.arg("tsmod", tsmod);
         request.arg("tssizes", tssizes);
+        request.post()
+    }
+    fn edit_tile(
+        &self,
+        token: &Token<Csrf>,
+        id: &str,
+        summary: Option<&str>,
+        toname: Option<&str>,
+        tomod: Option<&str>,
+        tox: Option<&str>,
+        toy: Option<&str>,
+        toz: Option<&str>,
+    ) -> Result<Json, Error> {
+        let mut request = self.request();
+        request.arg("action", "edittile");
+        request.arg("tstoken", &*token.0);
+        request.arg("tsid", id);
+        request.argo("tssummary", summary);
+        request.argo("tstoname", toname);
+        request.argo("tstomod", tomod);
+        request.argo("tstox", tox);
+        request.argo("tstoy", toy);
+        request.argo("tstoz", toz);
         request.post()
     }
 }

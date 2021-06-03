@@ -1,5 +1,3 @@
-#![feature(try_trait)]
-
 use cookie::{Cookie, CookieJar, ParseError as CookieError};
 use reqwest::{
     blocking::{multipart::Form, Client},
@@ -14,7 +12,6 @@ use std::{
     fs::File,
     io::{Error as IoError, Read},
     marker::PhantomData,
-    option::NoneError,
     path::Path,
     thread::sleep,
     time::Duration,
@@ -31,7 +28,6 @@ pub enum Error {
     Cookie(CookieError),
     Reqwest(ReqwestError),
     Status(String),
-    None,
 }
 impl From<Json> for Error {
     fn from(err: Json) -> Error {
@@ -61,11 +57,6 @@ impl From<ReqwestError> for Error {
 impl From<String> for Error {
     fn from(err: String) -> Error {
         Error::Status(err)
-    }
-}
-impl From<NoneError> for Error {
-    fn from(_: NoneError) -> Error {
-        Error::None
     }
 }
 
@@ -105,8 +96,9 @@ impl Mediawiki {
             .arg("lgpassword", self.config.password.clone())
             .arg("lgtoken", token.value());
         let json = request.post()?;
-        let inner = json.get("login")?;
-        let result = inner.get("result")?.as_str()?;
+        let result = json["login"]["result"]
+            .as_str()
+            .ok_or_else(|| Error::Json(json.clone()))?;
         match result {
             "Success" => {
                 println!("Logged in to MediaWiki");
@@ -129,10 +121,9 @@ impl Mediawiki {
             .arg("type", T::in_type())
             .get()?;
         Ok(Token::new(
-            json.get("query")?
-                .get("tokens")?
-                .get(T::out_type())?
-                .as_str()?,
+            json["query"]["tokens"][T::out_type()]
+                .as_str()
+                .ok_or_else(|| Error::Json(json.clone()))?,
         ))
     }
     pub fn query<T: Into<String>>(&self, list: T) -> QueryBuilder {
@@ -160,12 +151,19 @@ impl Mediawiki {
         request.arg("titles", format!("File:{}", name));
         request.arg("iiprop", "url");
         let json = request.get()?;
-        let images = json.get("query")?.get("pages")?;
-        let image = images.as_object()?.values().next()?;
-        if image.get("missing").is_some() {
+        let images = json["query"]["pages"]
+            .as_object()
+            .ok_or_else(|| Error::Json(json.clone()))?;
+        let image = images
+            .values()
+            .next()
+            .ok_or_else(|| Error::Json(json.clone()))?;
+        if !image["missing"].is_null() {
             return Ok(None);
         }
-        let url = image.get("imageinfo")?.get(0)?.get("url")?.as_str()?;
+        let url = image["imageinfo"][0]["url"]
+            .as_str()
+            .ok_or_else(|| Error::Json(image.clone()))?;
         let mut response = loop {
             let mut request = self.client.request(Method::GET, url);
             request = request.header(USER_AGENT, &*self.config.useragent);
@@ -234,6 +232,16 @@ impl<'a> RequestBuilder<'a> {
         self.args.insert(key.into(), val.into());
         self
     }
+    pub fn argo<T, U>(&mut self, key: T, val: Option<U>) -> &mut Self
+    where
+        T: Into<String>,
+        U: Into<String>,
+    {
+        if let Some(val) = val {
+            self.args.insert(key.into(), val.into());
+        }
+        self
+    }
     fn request(&self, method: Method, multipart: Option<Form>) -> Result<Json, Error> {
         let mut request = self
             .mw
@@ -266,13 +274,11 @@ impl<'a> RequestBuilder<'a> {
                 .add(Cookie::parse(String::from_utf8_lossy(cookie.as_bytes()))?.into_owned());
         }
         let status = response.status();
+        let text = response.text()?;
         if status.is_success() {
-            let text = response.text()?;
-            //println!("{}", text);
             let json: Json = serde_json::from_str(&text)?;
             Ok(json)
         } else {
-            let text = response.text()?;
             println!("{:?}", text);
             Err(status.to_string().into())
         }
@@ -316,6 +322,14 @@ impl<'a> QueryBuilder<'a> {
         self.req.arg(key, val);
         self
     }
+    pub fn argo<T, U>(&mut self, key: T, val: Option<U>) -> &mut Self
+    where
+        T: Into<String>,
+        U: Into<String>,
+    {
+        self.req.argo(key, val);
+        self
+    }
 }
 impl<'a> IntoIterator for QueryBuilder<'a> {
     type Item = Result<Json, Error>;
@@ -338,12 +352,17 @@ pub struct Query<'a> {
 impl<'a> Query<'a> {
     fn fill(&mut self) -> Result<bool, Error> {
         let json = self.req.get()?;
-        let buf = json.get("query")?.get(&self.list)?;
-        self.buf.clone_from(buf.as_array()?);
+        let buf = json["query"][&self.list]
+            .as_array()
+            .ok_or_else(|| Error::Json(json.clone()))?;
+        self.buf.clone_from(buf);
         self.buf.reverse();
-        if let Some(cont) = json.get("continue") {
-            for (key, val) in cont.as_object()? {
-                self.req.arg(&**key, val.as_str()?);
+        if let Json::Object(cont) = &json["continue"] {
+            for (key, val) in cont {
+                self.req.arg(
+                    &*key,
+                    val.as_str().ok_or_else(|| Error::Json(json.clone()))?,
+                );
             }
             Ok(true)
         } else {

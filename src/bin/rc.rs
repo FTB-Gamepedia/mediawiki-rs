@@ -12,10 +12,16 @@ fn main() {
     for change in mw.query_recentchanges(5000) {
         if let Err(e) = (|| -> Result<(), Error> {
             let change = change?;
-            let kind = change.get("type")?.as_str()?;
+            let kind = change["type"]
+                .as_str()
+                .ok_or_else(|| Error::Json(change.clone()))?;
             let name = if kind == "log" {
-                let logtype = change.get("logtype")?.as_str()?;
-                let logaction = change.get("logaction")?.as_str()?;
+                let logtype = change["logtype"]
+                    .as_str()
+                    .ok_or_else(|| Error::Json(change.clone()))?;
+                let logaction = change["logaction"]
+                    .as_str()
+                    .ok_or_else(|| Error::Json(change.clone()))?;
                 let _ = create_dir(base.join(logtype));
                 base.join(logtype).join(logaction).with_extension("json")
             } else {

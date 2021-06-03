@@ -20,7 +20,7 @@ fn import() {
             (name.into(), modd.into())
         })
         .collect();
-    let mut todelete: Vec<String> = Vec::new();
+    // let mut todelete: Vec<String> = Vec::new();
     for ore in mw.query_ores(None) {
         let ore = ore.unwrap();
         let ore = ore.as_object().unwrap();
@@ -29,11 +29,14 @@ fn import() {
         let item_name = ore["item_name"].as_str().unwrap();
         let id = ore["id"].as_i64().unwrap();
         let pair = (item_name.into(), mod_name.into());
+        if mod_name == "GT5" {
+            continue;
+        }
         //if !tiles.contains(&pair) {
         if !tiles.contains(&pair) {
-            if mod_name == "GT6-I" {
-                todelete.push(id.to_string());
-            }
+            // if mod_name == "GT6-I" {
+            //     todelete.push(id.to_string());
+            // }
             writeln!(
                 &mut file,
                 "{} {} = {} ({})",
