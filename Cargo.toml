@@ -1,9 +1,13 @@
 [package]
 name = "mediawiki"
 version = "0.0.1"
+description = "Rust crate to interface with the MediaWiki API, with special sauce for the Official Feed The Beast Wiki's extensions"
 authors = ["Peter Atashian <retep998@gmail.com>"]
 license = "MIT/Apache-2.0"
 edition = "2018"
+homepage = "https://github.com/FTB-Gamepedia/mediawiki-rs"
+repository = "https://github.com/FTB-Gamepedia/mediawiki-rs"
+readme = "README.md"
 
 [dependencies]
 cookie = "0.15"
