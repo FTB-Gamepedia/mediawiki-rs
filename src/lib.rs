@@ -154,12 +154,9 @@ impl Mediawiki {
         request.arg("iiprop", "url");
         let json = request.get()?;
         let images = json["query"]["pages"]
-            .as_object()
+            .as_array()
             .ok_or_else(|| Error::Json(json.clone()))?;
-        let image = images
-            .values()
-            .next()
-            .ok_or_else(|| Error::Json(json.clone()))?;
+        let image = images.first().ok_or_else(|| Error::Json(json.clone()))?;
         if !image["missing"].is_null() {
             return Ok(None);
         }
