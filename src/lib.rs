@@ -79,7 +79,9 @@ impl Mediawiki {
             config,
             client: Client::new(),
         };
-        mw.login()?;
+        if !mw.config.username.is_empty() {
+            mw.login()?;
+        }
         Ok(mw)
     }
     pub fn login_path<P: AsRef<Path>>(path: P) -> Result<Mediawiki, Error> {
@@ -148,7 +150,7 @@ impl Mediawiki {
         let mut request = self.request();
         request.arg("action", "query");
         request.arg("prop", "imageinfo");
-        request.arg("titles", format!("File:{}", name));
+        request.arg("titles", format!("File:{name}"));
         request.arg("iiprop", "url");
         let json = request.get()?;
         let images = json["query"]["pages"]
@@ -171,7 +173,7 @@ impl Mediawiki {
             if response.status() == StatusCode::OK {
                 break response;
             }
-            println!("{:?}", response);
+            println!("{response:?}");
             sleep(Duration::from_secs(5))
         };
         let mut buf = Vec::new();
@@ -222,6 +224,7 @@ impl<'a> RequestBuilder<'a> {
             args: HashMap::new(),
         };
         request.arg("format", "json");
+        request.arg("formatversion", "2");
         request
     }
     pub fn arg<T, U>(&mut self, key: T, val: U) -> &mut Self
@@ -277,9 +280,13 @@ impl<'a> RequestBuilder<'a> {
         let text = response.text()?;
         if status.is_success() {
             let json: Json = serde_json::from_str(&text)?;
-            Ok(json)
+            if json["error"].is_object() {
+                Err(Error::Json(json))
+            } else {
+                Ok(json)
+            }
         } else {
-            println!("{:?}", text);
+            println!("{text:?}");
             Err(status.to_string().into())
         }
     }
@@ -287,7 +294,7 @@ impl<'a> RequestBuilder<'a> {
         loop {
             match self.request(Method::POST, None) {
                 Ok(json) => return Ok(json),
-                Err(status) => println!("{:?}", status),
+                Err(status) => println!("{status:?}"),
             }
         }
     }
@@ -295,7 +302,7 @@ impl<'a> RequestBuilder<'a> {
         loop {
             match self.request(Method::GET, None) {
                 Ok(json) => return Ok(json),
-                Err(status) => println!("{:?}", status),
+                Err(status) => println!("{status:?}"),
             }
         }
     }
@@ -359,10 +366,8 @@ impl<'a> Query<'a> {
         self.buf.reverse();
         if let Json::Object(cont) = &json["continue"] {
             for (key, val) in cont {
-                self.req.arg(
-                    &*key,
-                    val.as_str().ok_or_else(|| Error::Json(json.clone()))?,
-                );
+                self.req
+                    .arg(key, val.as_str().ok_or_else(|| Error::Json(json.clone()))?);
             }
             Ok(true)
         } else {
@@ -397,7 +402,7 @@ impl<T> Token<T> {
         Token(token.to_owned(), PhantomData)
     }
     fn value(&self) -> &str {
-        &*self.0
+        &self.0
     }
 }
 #[derive(Debug)]

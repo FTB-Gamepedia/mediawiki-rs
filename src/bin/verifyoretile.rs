@@ -37,12 +37,7 @@ fn import() {
             // if mod_name == "GT6-I" {
             //     todelete.push(id.to_string());
             // }
-            writeln!(
-                &mut file,
-                "{} {} = {} ({})",
-                id, tag_name, item_name, mod_name
-            )
-            .unwrap();
+            writeln!(&mut file, "{id} {tag_name} = {item_name} ({mod_name})",).unwrap();
         }
     }
     /*

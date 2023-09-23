@@ -26,7 +26,7 @@ fn fix_gt5() {
         assert!(mod_name == "GT");
         let pair = (tag_name.into(), item_name.into());
         if !gt5_ores.contains(&pair) {
-            println!("{:?}", pair);
+            println!("{pair:?}");
             mw.edit_ore(&token, id, Some("GT5"), None, None, None)
                 .unwrap();
         }

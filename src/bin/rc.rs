@@ -30,10 +30,10 @@ fn main() {
             let mut file = files
                 .entry(name.clone())
                 .or_insert_with(|| BufWriter::new(File::create(name).unwrap()));
-            writeln!(&mut file, "{}", change)?;
+            writeln!(&mut file, "{change}")?;
             Ok(())
         })() {
-            println!("Error: {:?}", e);
+            println!("Error: {e:?}");
         }
     }
 }

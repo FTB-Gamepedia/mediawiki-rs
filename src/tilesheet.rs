@@ -1,6 +1,7 @@
 use crate::{Csrf, Error, Json, Mediawiki, QueryBuilder, Token};
 pub trait Tilesheet {
     fn query_tiles(&self, tsmod: Option<&str>) -> QueryBuilder;
+    fn query_tile_translations(&self, tsid: i64) -> QueryBuilder;
     fn add_tiles(
         &self,
         token: &Token<Csrf>,
@@ -47,6 +48,12 @@ impl Tilesheet for Mediawiki {
         let mut query = self.query("tilesheets");
         query.arg("list", "tilesheets");
         query.arg("tslimit", "5000");
+        query
+    }
+    fn query_tile_translations(&self, tsid: i64) -> QueryBuilder {
+        let mut query = self.query("tiles");
+        query.arg("list", "tiletranslations");
+        query.arg("tsid", tsid.to_string());
         query
     }
     fn delete_sheet(

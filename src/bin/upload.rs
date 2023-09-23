@@ -5,18 +5,18 @@ fn upload_test(filename: &str, file: Upload, comment: Option<&str>) {
     let result = mw
         .upload(filename, &token, file, None, comment, false)
         .unwrap();
-    println!("{:?}", result);
+    println!("{result:?}");
     match result["upload"]["result"].as_str().unwrap() {
         "Warning" => (),
         "Success" => return,
-        other => panic!("Unknown result: {}", other),
+        other => panic!("Unknown result: {other}"),
     }
     for (warning, _value) in result["upload"]["warnings"].as_object().unwrap() {
         match &**warning {
             "was-deleted" => (),
             "duplicate" => (),
             "exists" => (),
-            other => panic!("Unknown warning: {}", other),
+            other => panic!("Unknown warning: {other}"),
         }
     }
     let filekey = result["upload"]["filekey"].as_str().unwrap();
@@ -30,11 +30,11 @@ fn upload_test(filename: &str, file: Upload, comment: Option<&str>) {
             true,
         )
         .unwrap();
-    println!("{:?}", result);
+    println!("{result:?}");
     match result["upload"]["result"].as_str().unwrap() {
         "Warning" => (),
         "Success" => (),
-        other => panic!("Unknown result: {}", other),
+        other => panic!("Unknown result: {other}"),
     }
 }
 fn main() {
