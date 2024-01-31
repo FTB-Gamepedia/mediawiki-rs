@@ -22,7 +22,13 @@ pub trait Tilesheet {
         summary: Option<&str>,
     ) -> Result<Json, Error>;
     fn query_sheets(&self) -> QueryBuilder;
-    fn create_sheet(&self, token: &Token<Csrf>, tsmod: &str, tssizes: &str) -> Result<Json, Error>;
+    fn create_sheet(
+        &self,
+        token: &Token<Csrf>,
+        tsmod: &str,
+        tssizes: &str,
+        tssummary: &str,
+    ) -> Result<Json, Error>;
     #[allow(clippy::too_many_arguments)]
     fn edit_tile(
         &self,
@@ -97,12 +103,19 @@ impl Tilesheet for Mediawiki {
         request.argo("tssummary", summary);
         request.post()
     }
-    fn create_sheet(&self, token: &Token<Csrf>, tsmod: &str, tssizes: &str) -> Result<Json, Error> {
+    fn create_sheet(
+        &self,
+        token: &Token<Csrf>,
+        tsmod: &str,
+        tssizes: &str,
+        tssummary: &str,
+    ) -> Result<Json, Error> {
         let mut request = self.request();
         request.arg("action", "createsheet");
         request.arg("tstoken", &*token.0);
         request.arg("tsmod", tsmod);
         request.arg("tssizes", tssizes);
+        request.arg("tssummary", tssummary);
         request.post()
     }
     fn edit_tile(

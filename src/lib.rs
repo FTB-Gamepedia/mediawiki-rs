@@ -291,6 +291,7 @@ impl<'a> RequestBuilder<'a> {
         loop {
             match self.request(Method::POST, None) {
                 Ok(json) => return Ok(json),
+                Err(Error::Json(err)) => return Err(Error::Json(err)),
                 Err(status) => println!("{status:?}"),
             }
         }
